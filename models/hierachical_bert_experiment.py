@@ -6,6 +6,7 @@ import tensorflow as tf
 
 # %%
 from models.custom_layers import *
+import numpy as np
 
 
 # %%
@@ -47,7 +48,20 @@ pt_seq_time = tf.reshape(pt_seq_time, (-1, num_visit, num_concept_per_v))
 pt_seq
 
 # %%
-concept_embedding_layer = tf.keras.layers.Embedding(vocab_size, embeddinig_size)
+#concept_embedding_layer = tf.keras.layers.Embedding(vocab_size, embeddinig_size)
+
+#l2_regularizer = (tf.keras.regularizers.l2(l2_reg_penalty) if l2_reg_penalty else None)
+
+#output the embedding_matrix:
+concept_embedding_layer = ReusableEmbedding(
+    vocab_size, embeddinig_size,
+    input_length=num_seq,
+    name='bpe_embeddings'
+    # Regularization is based on paper "A Comparative Study on
+    # Regularization Strategies for Embedding-based Neural Networks"
+    # https://arxiv.org/pdf/1508.03721.pdf
+    #embeddings_regularizer=l2_regularizer
+)
  # # define the time embedding layer for absolute time stamps (since 1970)
 time_embedding_layer = TimeEmbeddingLayer(embedding_size=time_embeddings_size,
                                                   name='time_embedding_layer')
@@ -61,7 +75,7 @@ temporal_transformation_layer = tf.keras.layers.Dense(embeddinig_size,
 
 
 # %%
-pt_seq_concept_embeddings = concept_embedding_layer(pt_seq)
+pt_seq_concept_embeddings, embedding_matrix = concept_embedding_layer(pt_seq)
 pt_seq_age_embeddings = time_embedding_layer(pt_seq_age)
 pt_seq_time_embeddings = time_embedding_layer(pt_seq_time)
 
@@ -69,6 +83,9 @@ pt_seq_time_embeddings = time_embedding_layer(pt_seq_time)
 input_for_encoder = temporal_transformation_layer(
             tf.concat([pt_seq_concept_embeddings, pt_seq_age_embeddings, pt_seq_time_embeddings],
                       axis=-1, name='concat_for_encoder'))
+
+# %%
+pt_seq_concept_embeddings
 
 
 # %%
@@ -126,12 +143,42 @@ encoder_2 = Encoder(name='visit_encoder',
 visit_embeddings, _ = encoder_2(visit_embeddings, None)
 
 # %%
+visit_embeddings
+
+# %%
 mha = MultiHeadAttention(embeddinig_size, num_heads)
 
 # %%
 concept_embeddings = mha(visit_embeddings, visit_embeddings, contextualized_concept_emebddings_reshaped, None, None)
 
 # %%
-concept_embeddings
+#visit_seq_time = tf.sort(tf.random.uniform((1, 20), dtype = tf.int32, maxval = 100))
 
 # %%
+#visit_seq_time
+
+# %% [markdown]
+# ### Calculate time delta and insert into visit sequence
+
+# %%
+visit_seq_time_delta = tf.concat([visit_seq_time[:, 1:] - visit_seq_time[:, :-1]], axis=-1)
+
+# %%
+visit_seq_time_delta
+
+# %%
+att_embeddings, _ = concept_embedding_layer(visit_seq_time_delta)
+
+# %%
+A = np.identity(num_visit)
+identity = tf.constant(np.insert(A, range(1, num_visit), 0, axis=1), dtype=tf.float32)
+expanded_visit_embeddings = tf.transpose(tf.transpose(visit_embeddings, perm=[0, 2, 1]) @ identity, perm=[0, 2, 1])
+
+B = np.identity(num_visit-1)
+identity_inverse = tf.constant(np.insert(B, range(0, num_visit), 0, axis=1), dtype=tf.float32)
+
+expanded_att_embeddings = tf.transpose(tf.transpose(att_embeddings, perm=[0, 2, 1]) @ identity_inverse, perm=[0, 2, 1])
+merged_visit_embeddings = expanded_visit_embeddings + expanded_att_embeddings
+
+# %%
+merged_visit_embeddings
