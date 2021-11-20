@@ -5,6 +5,8 @@ import tensorflow as tf
 
 # %%
 from models.custom_layers import *
+from keras_transformer.bert import (masked_perplexity,
+                                    MaskedPenalizedSparseCategoricalCrossentropy)
 import numpy as np
 
 # %%
@@ -242,14 +244,15 @@ model = transformer_hierarchical_bert_model(num_visit,
 model.summary()
 
 # %%
-# pat_seq = tf.keras.layers.Input(shape=(max_seq,), dtype='int32', name='pat_seq')
-# pat_seq_age = tf.keras.layers.Input(shape=(max_seq,), dtype='int32', name='pat_seq_age')
-# pat_seq_time = tf.keras.layers.Input(shape=(max_seq,), dtype='int32', name='pat_seq_time')
-# pat_mask = tf.keras.layers.Input(shape=(max_seq,), dtype='int32', name='mask')
+optimizer = tf.optimizers.Adam(
+    learning_rate=2e-4, beta_1=0.9, beta_2=0.999)
 
-# visit_time_delta_att = tf.keras.layers.Input(shape=(num_of_visits - 1,), dtype='int32',
-#                                              name='visit_time_delta_att')
-# visit_mask = tf.keras.layers.Input(shape=(num_of_visits,), dtype='int32', name='visit_mask')
+losses = {
+    'concept_predictions': MaskedPenalizedSparseCategoricalCrossentropy(0.1),
+    'visit_predictions': MaskedPenalizedSparseCategoricalCrossentropy(0.1)
+}
+
+model.compile(optimizer, loss=losses, metrics={'concept_predictions': masked_perplexity})
 
 # %%
 pat_seq_input = tf.random.uniform((32, 1000), maxval=100, dtype=tf.int32)
@@ -267,15 +270,21 @@ inputs = {
     'visit_time_delta_att': visit_time_delta_att_input,
     'visit_mask': visit_mask_input
 }
-# concepts_types = tf.sort(tf.random.uniform((32, 20), maxval=10, dtype=tf.int32))
-# visit_types = tf.sort(tf.random.uniform((32, 20), maxval=10, dtype=tf.int32))
+
+concepts_types = tf.sort(tf.random.uniform((32, 1000), maxval=10, dtype=tf.int32))
+output_mask = tf.sort(tf.random.uniform((32, 1000), maxval=2, dtype=tf.int32))
+
+visit_types = tf.sort(tf.random.uniform((32, 20), maxval=10, dtype=tf.int32))
+output_visit_mask = tf.sort(tf.random.uniform((32, 20), maxval=2, dtype=tf.int32))
+
+output_dict = {
+    'concept_predictions': np.stack([concepts_types, output_mask], axis=-1),
+    'visit_predictions': np.stack([visit_types, output_visit_mask], axis=-1)
+}
+# %%
+dataset = tf.data.Dataset.from_tensor_slices((inputs, output_dict)).cache().batch(1)
 
 # %%
-dataset = tf.data.Dataset.from_tensor_slices((inputs)).cache().batch(1)
-
-# %%
-for batch in dataset:
-    print(model(batch))
-    break
+model.fit(dataset)
 
 # %%
