@@ -7,6 +7,20 @@ import tensorflow as tf
 from models.custom_layers import *
 import numpy as np
 
+# %%
+visit_embeddings = tf.random.uniform((1, 39, 128))
+
+# %%
+identity = tf.constant(
+        np.insert(
+            np.identity(num_visit),
+            obj=range(1, num_visit),
+            values=0,
+            axis=1
+        ),
+        dtype=tf.float32
+    )
+
 
 # %%
 def transformer_hierarchical_bert_model(num_of_visits,
@@ -26,7 +40,7 @@ def transformer_hierarchical_bert_model(num_of_visits,
     pat_seq = tf.keras.layers.Input(shape=(max_seq,), dtype='int32', name='pat_seq')
     pat_seq_age = tf.keras.layers.Input(shape=(max_seq,), dtype='int32', name='pat_seq_age')
     pat_seq_time = tf.keras.layers.Input(shape=(max_seq,), dtype='int32', name='pat_seq_time')
-    pat_mask = tf.keras.layers.Input(shape=(max_seq,), dtype='int32', name='mask')
+    pat_mask = tf.keras.layers.Input(shape=(max_seq,), dtype='int32', name='pat_mask')
 
     visit_time_delta_att = tf.keras.layers.Input(shape=(num_of_visits - 1,), dtype='int32',
                                                  name='visit_time_delta_att')
@@ -166,7 +180,9 @@ def transformer_hierarchical_bert_model(num_of_visits,
         projection_regularizer=l2_regularizer,
         projection_dropout=embedding_dropout,
         name='concept_prediction_logits')
-
+    
+    contextualized_visit_embeddings_without_att = identity @ contextualized_visit_embeddings
+    
     visit_prediction_dense = tf.keras.layers.Dense(visit_vocab_size)
 
     concept_softmax_layer = tf.keras.layers.Softmax(name='concept_predictions')
@@ -177,7 +193,7 @@ def transformer_hierarchical_bert_model(num_of_visits,
     )
 
     visit_predictions = visit_softmax_layer(
-        visit_prediction_dense(contextualized_visit_embeddings)
+        visit_prediction_dense(contextualized_visit_embeddings_without_att)
     )
 
     hierarchical_bert = tf.keras.Model(
@@ -224,5 +240,42 @@ model = transformer_hierarchical_bert_model(num_visit,
 
 # %%
 model.summary()
+
+# %%
+# pat_seq = tf.keras.layers.Input(shape=(max_seq,), dtype='int32', name='pat_seq')
+# pat_seq_age = tf.keras.layers.Input(shape=(max_seq,), dtype='int32', name='pat_seq_age')
+# pat_seq_time = tf.keras.layers.Input(shape=(max_seq,), dtype='int32', name='pat_seq_time')
+# pat_mask = tf.keras.layers.Input(shape=(max_seq,), dtype='int32', name='mask')
+
+# visit_time_delta_att = tf.keras.layers.Input(shape=(num_of_visits - 1,), dtype='int32',
+#                                              name='visit_time_delta_att')
+# visit_mask = tf.keras.layers.Input(shape=(num_of_visits,), dtype='int32', name='visit_mask')
+
+# %%
+pat_seq_input = tf.random.uniform((32, 1000), maxval=100, dtype=tf.int32)
+pat_seq_age_input = tf.sort(tf.random.uniform((32, 1000), minval=18, maxval=100, dtype=tf.int32))
+pat_seq_time_input = tf.sort(tf.random.uniform((32, 1000), maxval=1000, dtype=tf.int32))
+pat_mask_input = tf.sort(tf.random.uniform((32, 1000), maxval=2, dtype=tf.int32))
+
+visit_time_delta_att_input = tf.sort(tf.random.uniform((32, 19), maxval=20, dtype=tf.int32))
+visit_mask_input = tf.sort(tf.random.uniform((32, 20), maxval=2, dtype=tf.int32))
+inputs = {
+    'pat_seq': pat_seq_input,
+    'pat_seq_age': pat_seq_age_input,
+    'pat_seq_time': pat_seq_time_input,
+    'pat_mask': pat_mask_input,
+    'visit_time_delta_att': visit_time_delta_att_input,
+    'visit_mask': visit_mask_input
+}
+# concepts_types = tf.sort(tf.random.uniform((32, 20), maxval=10, dtype=tf.int32))
+# visit_types = tf.sort(tf.random.uniform((32, 20), maxval=10, dtype=tf.int32))
+
+# %%
+dataset = tf.data.Dataset.from_tensor_slices((inputs)).cache().batch(1)
+
+# %%
+for batch in dataset:
+    print(model(batch))
+    break
 
 # %%
