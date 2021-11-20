@@ -9,20 +9,6 @@ from keras_transformer.bert import (masked_perplexity,
                                     MaskedPenalizedSparseCategoricalCrossentropy)
 import numpy as np
 
-# %%
-visit_embeddings = tf.random.uniform((1, 39, 128))
-
-# %%
-identity = tf.constant(
-        np.insert(
-            np.identity(num_visit),
-            obj=range(1, num_visit),
-            values=0,
-            axis=1
-        ),
-        dtype=tf.float32
-    )
-
 
 # %%
 def transformer_hierarchical_bert_model(num_of_visits,
@@ -56,13 +42,12 @@ def transformer_hierarchical_bert_model(num_of_visits,
     pat_seq_age = tf.reshape(pat_seq_age, (-1, num_of_visits, num_of_concepts))
     pat_seq_time = tf.reshape(pat_seq_time, (-1, num_of_visits, num_of_concepts))
 
-    pat_concept_mask = create_concept_mask(tf.reshape(pat_mask, (-1, num_of_concepts)),
-                                           num_of_concepts)
+    pat_concept_mask = tf.reshape(pat_mask, (-1, num_of_concepts))[:, tf.newaxis, tf.newaxis, :]
 
     visit_mask_with_att = tf.reshape(tf.stack([visit_mask, visit_mask], axis=2),
                                      (-1, num_of_visits * 2))[:, 1:]
 
-    visit_concept_mask = create_concept_mask(visit_mask_with_att, num_of_visits * 2 - 1)
+    visit_concept_mask = visit_mask_with_att[:, tf.newaxis, tf.newaxis, :]
 
     # output the embedding_matrix:
     l2_regularizer = (tf.keras.regularizers.l2(l2_reg_penalty) if l2_reg_penalty else None)
@@ -175,16 +160,16 @@ def transformer_hierarchical_bert_model(num_of_visits,
         contextualized_visit_embeddings,
         contextualized_visit_embeddings,
         contextualized_concept_embeddings,
-        visit_mask_with_att,
+        visit_concept_mask,
         None)
 
     concept_output_layer = TiedOutputEmbedding(
         projection_regularizer=l2_regularizer,
         projection_dropout=embedding_dropout,
         name='concept_prediction_logits')
-    
+
     contextualized_visit_embeddings_without_att = identity @ contextualized_visit_embeddings
-    
+
     visit_prediction_dense = tf.keras.layers.Dense(visit_vocab_size)
 
     concept_softmax_layer = tf.keras.layers.Softmax(name='concept_predictions')
