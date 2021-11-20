@@ -244,13 +244,13 @@ model.compile(optimizer, loss=losses, metrics={'concept_predictions': masked_per
 # %%
 n_of_data_points = 2560
 
-pat_seq_input = tf.random.uniform((n_of_data_points, 1000), maxval=100, dtype=tf.int32)
-pat_seq_age_input = tf.sort(tf.random.uniform((n_of_data_points, 1000), minval=18, maxval=100, dtype=tf.int32))
-pat_seq_time_input = tf.sort(tf.random.uniform((n_of_data_points, 1000), maxval=1000, dtype=tf.int32))
-pat_mask_input = tf.sort(tf.random.uniform((n_of_data_points, 1000), maxval=2, dtype=tf.int32))
+pat_seq_input = tf.random.uniform((n_of_data_points, num_seq), maxval=100, dtype=tf.int32)
+pat_seq_age_input = tf.sort(tf.random.uniform((n_of_data_points, num_seq), minval=18, maxval=100, dtype=tf.int32))
+pat_seq_time_input = tf.sort(tf.random.uniform((n_of_data_points, num_seq), maxval=1000, dtype=tf.int32))
+pat_mask_input = tf.sort(tf.random.uniform((n_of_data_points, num_seq), maxval=2, dtype=tf.int32))
 
-visit_time_delta_att_input = tf.sort(tf.random.uniform((n_of_data_points, 19), maxval=20, dtype=tf.int32))
-visit_mask_input = tf.sort(tf.random.uniform((n_of_data_points, 20), maxval=2, dtype=tf.int32))
+visit_time_delta_att_input = tf.sort(tf.random.uniform((n_of_data_points, num_visit - 1), maxval=20, dtype=tf.int32))
+visit_mask_input = tf.sort(tf.random.uniform((n_of_data_points, num_visit), maxval=2, dtype=tf.int32))
 inputs = {
     'pat_seq': pat_seq_input,
     'pat_seq_age': pat_seq_age_input,
@@ -260,18 +260,23 @@ inputs = {
     'visit_mask': visit_mask_input
 }
 
-concepts_types = tf.sort(tf.random.uniform((n_of_data_points, 1000), maxval=10, dtype=tf.int32))
-output_mask = tf.sort(tf.random.uniform((n_of_data_points, 1000), maxval=2, dtype=tf.int32))
+concepts_types = tf.sort(tf.random.uniform((n_of_data_points, num_seq), maxval=10, dtype=tf.int32))
+output_mask = tf.sort(tf.random.uniform((n_of_data_points, num_seq), maxval=2, dtype=tf.int32))
 
-visit_types = tf.sort(tf.random.uniform((n_of_data_points, 20), maxval=10, dtype=tf.int32))
-output_visit_mask = tf.sort(tf.random.uniform((n_of_data_points, 20), maxval=2, dtype=tf.int32))
+visit_types = tf.sort(tf.random.uniform((n_of_data_points, num_visit), maxval=10, dtype=tf.int32))
+output_visit_mask = tf.sort(tf.random.uniform((n_of_data_points, num_visit), maxval=2, dtype=tf.int32))
 
 output_dict = {
     'concept_predictions': np.stack([concepts_types, output_mask], axis=-1),
     'visit_predictions': np.stack([visit_types, output_visit_mask], axis=-1)
 }
 # %%
-dataset = tf.data.Dataset.from_tensor_slices((inputs, output_dict)).cache().batch(16)
+dataset = tf.data.Dataset.from_tensor_slices((inputs, output_dict)).cache().batch(1)
+
+# %%
+for x, y in dataset:
+    print(model(x))
+    break
 
 # %%
 model.fit(dataset)
