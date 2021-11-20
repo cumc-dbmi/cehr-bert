@@ -54,9 +54,6 @@ def transformer_hierarchical_bert_model(num_of_visits,
         concept_vocab_size, embedding_size,
         input_length=max_seq,
         name='bpe_embeddings',
-        # Regularization is based on paper "A Comparative Study on
-        # Regularization Strategies for Embedding-based Neural Networks"
-        # https://arxiv.org/pdf/1508.03721.pdf
         embeddings_regularizer=l2_regularizer
     )
 
@@ -110,6 +107,15 @@ def transformer_hierarchical_bert_model(num_of_visits,
     )
 
     # Insert the att embeddings between the visit embeddings using the following trick
+    identity = tf.constant(
+        np.insert(
+            np.identity(num_visit),
+            obj=range(1, num_visit),
+            values=0,
+            axis=1
+        ),
+        dtype=tf.float32
+    )
     expanded_visit_embeddings = tf.transpose(
         tf.transpose(visit_embeddings, perm=[0, 2, 1]) @ identity,
         perm=[0, 2, 1]
@@ -117,6 +123,15 @@ def transformer_hierarchical_bert_model(num_of_visits,
 
     # Look up the embeddings for the att tokens
     att_embeddings, _ = concept_embedding_layer(visit_time_delta_att)
+    # Create the inverse "identity" matrix for inserting att embeddings
+    identity_inverse = tf.constant(
+        np.insert(
+            np.identity(num_of_visits - 1),
+            obj=range(0, num_of_visits),
+            values=0,
+            axis=1),
+        dtype=tf.float32)
+
     expanded_att_embeddings = tf.transpose(
         tf.transpose(att_embeddings, perm=[0, 2, 1]) @ identity_inverse,
         perm=[0, 2, 1]
@@ -137,15 +152,9 @@ def transformer_hierarchical_bert_model(num_of_visits,
         visit_concept_mask
     )
 
-    # decoder_layer = DecoderLayer(d_model=embedding_size, num_heads=num_heads, dff=512)
+    # Use a multi head attention layer to generate the global concept embeddings by attending to
+    # the visit embeddings
     multi_head_attention_layer = MultiHeadAttention(embeddinig_size, num_heads)
-
-    # global_concept_embeddings, _, _ = decoder_layer(
-    #     contextualized_concept_embeddings,
-    #     contextualized_visit_embeddings,
-    #     pat_concept_mask,
-    #     visit_mask_with_att)
-
     global_concept_embeddings, _ = multi_head_attention_layer(
         contextualized_visit_embeddings,
         contextualized_visit_embeddings,
@@ -203,11 +212,6 @@ num_heads = 8
 transformer_dropout: float = 0.1
 embedding_dropout: float = 0.6
 l2_regularizer = tf.keras.regularizers.l2(1e-4)
-
-identity = tf.constant(np.insert(np.identity(num_visit), range(1, num_visit), 0, axis=1),
-                       dtype=tf.float32)
-identity_inverse = tf.constant(
-    np.insert(np.identity(num_visit - 1), range(0, num_visit), 0, axis=1), dtype=tf.float32)
 
 # %%
 model = transformer_hierarchical_bert_model(num_visit,
