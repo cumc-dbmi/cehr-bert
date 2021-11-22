@@ -3,12 +3,13 @@ from dask.dataframe import Series as dd_series
 from pandas import Series as df_series
 from tensorflow.python.keras.preprocessing.text import Tokenizer
 
-BERT_SPECIAL_TOKENS = ['[MASK]', '[UNUSED]']
+BERT_SPECIAL_TOKENS = ['[MASK]', '[UNUSED]', '[CLS']
 
 
 class ConceptTokenizer:
     unused_token = ['[UNUSED]']
     mask_token = ['[MASK]']
+    cls_token = ['[CLS]']
 
     def __init__(self, special_tokens: Optional[Sequence[str]] = None, oov_token='0'):
         self.special_tokens = special_tokens
@@ -25,6 +26,7 @@ class ConceptTokenizer:
 
         self.tokenizer.fit_on_texts(self.mask_token)
         self.tokenizer.fit_on_texts(self.unused_token)
+        self.tokenizer.fit_on_texts(self.cls_token)
         if self.special_tokens is not None:
             self.tokenizer.fit_on_texts(self.special_tokens)
 
@@ -69,3 +71,9 @@ class ConceptTokenizer:
         while isinstance(mask_token_id, list):
             mask_token_id = mask_token_id[0]
         return mask_token_id
+
+    def get_cls_token_id(self):
+        cls_token_id = self.encode(self.cls_token)
+        while isinstance(cls_token_id, list):
+            cls_token_id = cls_token_id[0]
+        return cls_token_id
