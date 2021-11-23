@@ -273,21 +273,23 @@ class HierarchicalBertDataGenerator(AbstractDataGeneratorBase):
 
     def __init__(self,
                  concept_tokenizer: ConceptTokenizer,
-                 visit_tokenizer: ConceptTokenizer,
                  max_num_of_visits: int,
                  max_num_of_concepts: int,
                  sliding_window: int = 10,
                  *args,
                  **kwargs):
-        super(HierarchicalBertDataGenerator, self).__init__(*args, **kwargs)
+
+        super(HierarchicalBertDataGenerator, self).__init__(concept_tokenizer=concept_tokenizer,
+                                                            max_num_of_visits=max_num_of_visits,
+                                                            max_num_of_concepts=max_num_of_concepts,
+                                                            *args, **kwargs)
         self._concept_tokenizer = concept_tokenizer
-        self._visit_tokenizer = visit_tokenizer
         self._max_num_of_visits = max_num_of_visits
         self._max_num_of_concepts = max_num_of_concepts
         self._sliding_window = sliding_window
 
     def _get_learning_objective_classes(self):
-        return [MaskedLanguageModelLearningObjective]
+        return [HierarchicalMaskedLanguageModelLearningObjective]
 
     def _calculate_step(self, num_of_visits):
         """
@@ -318,7 +320,7 @@ class HierarchicalBertDataGenerator(AbstractDataGeneratorBase):
                     yield RowSlicer(row, start_index, end_index)
 
     def estimate_data_size(self):
-        return self.__training_data.num_of_visits.apply(self.calculate_step).sum()
+        return self._training_data.num_of_visits.apply(self._calculate_step).sum()
 
 
 class MedBertDataGenerator(BertDataGenerator):

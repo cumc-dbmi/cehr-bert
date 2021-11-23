@@ -358,7 +358,7 @@ class HierarchicalMaskedLanguageModelLearningObjective(LearningObjective):
     required_columns = ['concept_ids', 'dates',
                         'visit_segments', 'ages',
                         'visit_dates', 'visit_masks',
-                        'visit_concept_ids', 'time_interval_atts']
+                        'visit_token_ids', 'time_interval_atts']
 
     def __init__(self, concept_tokenizer: ConceptTokenizer,
                  max_num_of_visits: int,
@@ -394,7 +394,7 @@ class HierarchicalMaskedLanguageModelLearningObjective(LearningObjective):
 
         (
             output_concept_masks, masked_concepts, concepts, dates, ages,
-            visit_concept_ids, visit_segments, visit_dates, visit_masks, time_interval_atts
+            visit_token_ids, visit_segments, visit_dates, visit_masks, time_interval_atts
         ) = zip(*list(map(self._make_record, rows)))
 
         unused_token_id = self._concept_tokenizer.get_unused_token_id()
@@ -404,32 +404,23 @@ class HierarchicalMaskedLanguageModelLearningObjective(LearningObjective):
             .apply(convert_to_list_of_lists) \
             .apply(self._concept_tokenizer.encode) \
             .apply(lambda tokens: self._pad(tokens,
-                                            padd_token=unused_token_id,
-                                            max_seq=self._max_num_of_concepts))
+                                            padded_token=unused_token_id))
         concepts = pd.Series(concepts) \
             .apply(convert_to_list_of_lists) \
             .apply(self._concept_tokenizer.encode) \
             .apply(lambda tokens: self._pad(tokens,
-                                            padd_token=unused_token_id,
-                                            max_seq=self._max_num_of_concepts))
+                                            padded_token=unused_token_id))
 
         pat_mask = list(map(self._concept_mask, masked_concepts))
 
         # The auxiliary inputs for bert
-        visit_segments = pd.Series(visit_segments).apply(convert_to_list_of_lists) \
-            .apply(lambda tokens: self._pad(tokens,
-                                            padd_token=unused_token_id,
-                                            max_seq=self._max_num_of_concepts))
-
         dates = pd.Series(dates).apply(convert_to_list_of_lists) \
             .apply(lambda time_stamps: self._pad(time_stamps,
-                                                 padd_token=0,
-                                                 max_seq=self._max_num_of_concepts))
+                                                 padded_token=0))
 
         ages = pd.Series(ages).apply(convert_to_list_of_lists) \
             .apply(lambda time_stamps: self._pad(time_stamps,
-                                                 padd_token=0,
-                                                 max_seq=self._max_num_of_concepts))
+                                                 padded_token=0))
 
         input_dict = {'pat_seq': masked_concepts,
                       'pat_mask': pat_mask,
@@ -438,11 +429,14 @@ class HierarchicalMaskedLanguageModelLearningObjective(LearningObjective):
                       'visit_segment': visit_segments,
                       'visit_time_delta_att': time_interval_atts,
                       'visit_mask': visit_masks}
-
-        concepts = np.reshape(concepts, (-1, self._max_num_of_concepts * self._max_num_of_visits))
-        output_visit_masks = np.ones_like(visit_concept_ids)
-        output_dict = {'concept_predictions': np.stack([concepts, output_concept_masks], axis=-1),
-                       'visit_predictions': np.stack([visit_concept_ids, output_visit_masks],
+        concepts = np.reshape(np.stack(concepts),
+                              (-1, self._max_num_of_concepts * self._max_num_of_visits))
+        output_concept_masks = np.reshape(output_concept_masks,
+                                          (-1, self._max_num_of_concepts * self._max_num_of_visits))
+        output_visit_masks = np.ones_like(visit_token_ids)
+        output_dict = {'concept_predictions': np.stack([concepts, output_concept_masks],
+                                                       axis=-1),
+                       'visit_predictions': np.stack([visit_token_ids, output_visit_masks],
                                                      axis=-1)}
 
         return input_dict, output_dict
@@ -465,7 +459,7 @@ class HierarchicalMaskedLanguageModelLearningObjective(LearningObjective):
         visit_segments = row.visit_segments[start_index:end_index]
         visit_dates = row.visit_dates[start_index:end_index]
         visit_masks = row.visit_masks[start_index:end_index]
-        visit_concept_ids = row.visit_concept_ids[start_index:end_index]
+        visit_token_ids = row.visit_token_ids[start_index:end_index]
         # Skip the first element because there is no time interval for it
         time_interval_atts = row.time_interval_atts[start_index + 1:end_index]
 
@@ -474,7 +468,7 @@ class HierarchicalMaskedLanguageModelLearningObjective(LearningObjective):
 
         return (
             output_concept_masks, masked_concepts, concepts, dates, ages,
-            visit_concept_ids, visit_segments, visit_dates, visit_masks, time_interval_atts
+            visit_token_ids, visit_segments, visit_dates, visit_masks, time_interval_atts
         )
 
     def _mask_concepts(self, concepts):
