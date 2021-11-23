@@ -2,6 +2,7 @@ import logging
 from typing import Set
 import inspect
 
+import math
 from collections import ChainMap
 from pandas import DataFrame
 from itertools import chain
@@ -266,6 +267,58 @@ class BertVisitPredictionDataGenerator(BertDataGenerator):
 
     def _get_learning_objective_classes(self):
         return [MaskedLanguageModelLearningObjective, VisitPredictionLearningObjective]
+
+
+class HierarchicalBertDataGenerator(AbstractDataGeneratorBase):
+
+    def __init__(self,
+                 concept_tokenizer: ConceptTokenizer,
+                 visit_tokenizer: ConceptTokenizer,
+                 max_num_of_visits: int,
+                 max_num_of_concepts: int,
+                 sliding_window: int = 10,
+                 *args,
+                 **kwargs):
+        super(HierarchicalBertDataGenerator, self).__init__(*args, **kwargs)
+        self._concept_tokenizer = concept_tokenizer
+        self._visit_tokenizer = visit_tokenizer
+        self._max_num_of_visits = max_num_of_visits
+        self._max_num_of_concepts = max_num_of_concepts
+        self._sliding_window = sliding_window
+
+    def _get_learning_objective_classes(self):
+        return [MaskedLanguageModelLearningObjective]
+
+    def _calculate_step(self, num_of_visits):
+        """
+        Calculate the number of steps used for the sliding window strategy
+        :param num_of_visits:
+        :return:
+        """
+        if num_of_visits <= self._max_num_of_visits:
+            return 1
+        else:
+            return math.ceil((num_of_visits - self._max_num_of_visits) / self._sliding_window) + 1
+
+    def _create_iterator(self):
+        """
+        Create an iterator that will iterate forever
+        :return:
+        """
+        while True:
+            for row in self._training_data.itertuples():
+                for step in range(self._calculate_step(row.num_of_visits)):
+                    start_index = step * self._sliding_window
+                    end_index = step * self._sliding_window + self._max_num_of_visits
+
+                    if end_index > row.num_of_visits:
+                        start_index = row.num_of_visits - self._max_num_of_visits
+                        end_index = row.num_of_visits
+
+                    yield RowSlicer(row, start_index, end_index)
+
+    def estimate_data_size(self):
+        return self.__training_data.num_of_visits.apply(self.calculate_step).sum()
 
 
 class MedBertDataGenerator(BertDataGenerator):

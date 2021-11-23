@@ -91,6 +91,10 @@ def tokenize_concepts(training_data: Union[pd_dataframe, dd_dataframe],
     return tokenizer
 
 
+def convert_to_list_of_lists(concept_lists):
+    return list(map(lambda sub_arrays: sub_arrays.tolist(), concept_lists))
+
+
 @log_function_decorator
 def compute_binary_metrics(model, test_data: Union[Dataset, Tuple[np.ndarray, np.ndarray]],
                            metrics_folder):
