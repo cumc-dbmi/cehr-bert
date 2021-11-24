@@ -70,6 +70,7 @@ class HierarchicalBertTrainer(AbstractConceptEmbeddingTrainer):
         parameters = {
             'training_data': self._training_data,
             'concept_tokenizer': self._tokenizer,
+            'max_seq': self._max_num_visits * self._max_num_concepts,
             'batch_size': self._batch_size,
             'max_num_of_visits': self._max_num_visits,
             'max_num_of_concepts': self._max_num_concepts
