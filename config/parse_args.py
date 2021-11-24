@@ -2,19 +2,23 @@ import argparse
 
 
 def create_parse_args():
-    parser = argparse.ArgumentParser(description='Arguments for concept embedding model')
-    parser.add_argument('-i',
-                        '--input_folder',
-                        dest='input_folder',
-                        action='store',
-                        help='The path for your input_folder where the raw data is',
-                        required=True)
-    parser.add_argument('-o',
-                        '--output_folder',
-                        dest='output_folder',
-                        action='store',
-                        help='The output folder that stores the domain tables download destination',
-                        required=True)
+    parser = argparse.ArgumentParser(
+        description='Arguments for concept embedding model')
+    parser.add_argument(
+        '-i',
+        '--input_folder',
+        dest='input_folder',
+        action='store',
+        help='The path for your input_folder where the raw data is',
+        required=True)
+    parser.add_argument(
+        '-o',
+        '--output_folder',
+        dest='output_folder',
+        action='store',
+        help=
+        'The output folder that stores the domain tables download destination',
+        required=True)
     parser.add_argument('-m',
                         '--max_seq_length',
                         dest='max_seq_length',
@@ -93,12 +97,8 @@ def create_parse_args_base_bert():
                         '--use_time_embedding',
                         dest='use_time_embedding',
                         action='store_true')
-    parser.add_argument('--use_behrt',
-                        dest='use_behrt',
-                        action='store_true')
-    parser.add_argument('--use_dask',
-                        dest='use_dask',
-                        action='store_true')
+    parser.add_argument('--use_behrt', dest='use_behrt', action='store_true')
+    parser.add_argument('--use_dask', dest='use_dask', action='store_true')
     parser.add_argument('--time_embeddings_size',
                         dest='time_embeddings_size',
                         action='store',
@@ -110,10 +110,29 @@ def create_parse_args_base_bert():
 
 def create_parse_args_temporal_bert():
     parser = create_parse_args_base_bert()
-    parser.add_argument('-ti',
-                        '--time_attention_folder',
-                        dest='time_attention_folder',
+    parser.add_argument(
+        '-ti',
+        '--time_attention_folder',
+        dest='time_attention_folder',
+        action='store',
+        help=
+        'The path for your time attention input_folder where the raw data is',
+        required=True)
+    return parser
+
+
+def create_parse_args_hierarchical_bert():
+    parser = create_parse_args_base_bert()
+    parser.add_argument('--max_num_visits',
+                        dest='max_num_visits',
                         action='store',
-                        help='The path for your time attention input_folder where the raw data is',
+                        type=int,
+                        help='Max no.of visits per patient',
+                        required=True)
+    parser.add_argument('--max_num_concepts',
+                        dest='max_num_concepts',
+                        action='store',
+                        type=int,
+                        help='Max no.of concepts per visit per patient',
                         required=True)
     return parser
