@@ -380,7 +380,7 @@ class VisitEmbeddingLayer(tf.keras.layers.Layer):
 
     def call(self, inputs, **kwargs):
         visit_orders, concept_embeddings = inputs
-        return self.visit_embedding_layer(visit_orders) + concept_embeddings
+        return self.visit_embedding_layer(visit_orders, **kwargs) + concept_embeddings
 
 
 class TimeAttention(tf.keras.layers.Layer):

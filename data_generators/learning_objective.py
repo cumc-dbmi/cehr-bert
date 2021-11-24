@@ -358,7 +358,7 @@ class HierarchicalMaskedLanguageModelLearningObjective(LearningObjective):
     required_columns = ['concept_ids', 'dates',
                         'visit_segments', 'ages',
                         'visit_dates', 'visit_masks',
-                        'visit_token_ids', 'time_interval_atts']
+                        'time_interval_atts']
 
     def __init__(self, concept_tokenizer: ConceptTokenizer,
                  max_num_of_visits: int,
@@ -375,10 +375,11 @@ class HierarchicalMaskedLanguageModelLearningObjective(LearningObjective):
             'pat_seq_age': int32,
             'pat_seq_time': int32,
             'pat_mask': int32,
+            'visit_segment': int32,
             'visit_time_delta_att': int32,
             'visit_mask': int32
         }
-        output_dict_schema = {'concept_predictions': int32, 'visit_predictions': int32}
+        output_dict_schema = {'concept_predictions': int32}
         return input_dict_schema, output_dict_schema
 
     def _pad(self, x, padded_token):
@@ -394,33 +395,47 @@ class HierarchicalMaskedLanguageModelLearningObjective(LearningObjective):
 
         (
             output_concept_masks, masked_concepts, concepts, dates, ages,
-            visit_token_ids, visit_segments, visit_dates, visit_masks, time_interval_atts
+            visit_segments, visit_dates, visit_masks, time_interval_atts
         ) = zip(*list(map(self._make_record, rows)))
 
         unused_token_id = self._concept_tokenizer.get_unused_token_id()
 
         # The main inputs for bert
-        masked_concepts = pd.Series(masked_concepts) \
+        masked_concepts = np.stack(pd.Series(masked_concepts) \
             .apply(convert_to_list_of_lists) \
             .apply(self._concept_tokenizer.encode) \
-            .apply(lambda tokens: self._pad(tokens,
-                                            padded_token=unused_token_id))
-        concepts = pd.Series(concepts) \
-            .apply(convert_to_list_of_lists) \
-            .apply(self._concept_tokenizer.encode) \
-            .apply(lambda tokens: self._pad(tokens,
-                                            padded_token=unused_token_id))
+            .apply(
+            lambda tokens: self._pad(tokens, padded_token=unused_token_id)))
 
-        pat_mask = list(map(self._concept_mask, masked_concepts))
+        concepts = np.stack(pd.Series(concepts) \
+                            .apply(convert_to_list_of_lists) \
+                            .apply(self._concept_tokenizer.encode) \
+                            .apply(lambda tokens: self._pad(tokens, padded_token=unused_token_id)))
+
+        pat_mask = (masked_concepts == unused_token_id).astype(int)
+
+        time_interval_atts = np.asarray(
+            self._concept_tokenizer.encode(
+                np.stack(time_interval_atts).tolist()
+            )
+        )
+
+        visit_masks = np.stack(visit_masks)
+
+        visit_segments = np.stack(visit_segments)
 
         # The auxiliary inputs for bert
-        dates = pd.Series(dates).apply(convert_to_list_of_lists) \
-            .apply(lambda time_stamps: self._pad(time_stamps,
-                                                 padded_token=0))
+        dates = np.stack(
+            pd.Series(dates) \
+                .apply(convert_to_list_of_lists) \
+                .apply(lambda time_stamps: self._pad(time_stamps, padded_token=0))
+        )
 
-        ages = pd.Series(ages).apply(convert_to_list_of_lists) \
-            .apply(lambda time_stamps: self._pad(time_stamps,
-                                                 padded_token=0))
+        ages = np.stack(
+            pd.Series(ages) \
+                .apply(convert_to_list_of_lists) \
+                .apply(lambda time_stamps: self._pad(time_stamps, padded_token=0))
+        )
 
         input_dict = {'pat_seq': masked_concepts,
                       'pat_mask': pat_mask,
@@ -429,15 +444,17 @@ class HierarchicalMaskedLanguageModelLearningObjective(LearningObjective):
                       'visit_segment': visit_segments,
                       'visit_time_delta_att': time_interval_atts,
                       'visit_mask': visit_masks}
-        concepts = np.reshape(np.stack(concepts),
-                              (-1, self._max_num_of_concepts * self._max_num_of_visits))
+
+        output_concept_masks = np.stack(
+            pd.Series(output_concept_masks) \
+                .apply(convert_to_list_of_lists) \
+                .apply(lambda masks: self._pad(masks, padded_token=0))
+        )
+
+        concepts = np.reshape(concepts, (-1, self._max_num_of_concepts * self._max_num_of_visits))
         output_concept_masks = np.reshape(output_concept_masks,
                                           (-1, self._max_num_of_concepts * self._max_num_of_visits))
-        output_visit_masks = np.ones_like(visit_token_ids)
-        output_dict = {'concept_predictions': np.stack([concepts, output_concept_masks],
-                                                       axis=-1),
-                       'visit_predictions': np.stack([visit_token_ids, output_visit_masks],
-                                                     axis=-1)}
+        output_dict = {'concept_predictions': np.stack([concepts, output_concept_masks], axis=-1)}
 
         return input_dict, output_dict
 
@@ -453,23 +470,37 @@ class HierarchicalMaskedLanguageModelLearningObjective(LearningObjective):
 
         row, start_index, end_index, _ = row_slicer
 
-        concepts = row.concept_ids[start_index:end_index]
-        dates = row.dates[start_index:end_index]
-        ages = row.ages[start_index:end_index]
-        visit_segments = row.visit_segments[start_index:end_index]
-        visit_dates = row.visit_dates[start_index:end_index]
-        visit_masks = row.visit_masks[start_index:end_index]
-        visit_token_ids = row.visit_token_ids[start_index:end_index]
+        concepts = self._pad_visits(row.concept_ids[start_index:end_index], '0')
+        dates = self._pad_visits(row.dates[start_index:end_index], 0)
+        ages = self._pad_visits(row.ages[start_index:end_index], 0)
+        visit_segments = self._pad_visits(row.visit_segments[start_index:end_index], 0, False)
+        visit_dates = self._pad_visits(row.visit_dates[start_index:end_index], 0, False)
+        visit_masks = self._pad_visits(row.visit_masks[start_index:end_index], 1, False)
         # Skip the first element because there is no time interval for it
-        time_interval_atts = row.time_interval_atts[start_index + 1:end_index]
+        time_interval_atts = self._pad_visits(row.time_interval_atts[start_index:end_index], '0',
+                                              False)[1:]
 
         masked_concepts, output_concept_masks = zip(
-            *list(map(self._mask_concepts, row.concept_ids[0:20])))
+            *list(map(self._mask_concepts, concepts)))
 
         return (
             output_concept_masks, masked_concepts, concepts, dates, ages,
-            visit_token_ids, visit_segments, visit_dates, visit_masks, time_interval_atts
+            visit_segments, visit_dates, visit_masks, time_interval_atts
         )
+
+    def _pad_visits(self, field_values, pad_value, is_visit_level=True):
+        total_num_visits = len(field_values)
+        if total_num_visits < self._max_num_of_visits:
+            num_of_pads = self._max_num_of_visits - total_num_visits
+            if is_visit_level:
+                pad_values = [np.asarray([pad_value])] * num_of_pads
+            else:
+                pad_values = [pad_value] * num_of_pads
+            field_values = field_values.tolist() if not isinstance(field_values,
+                                                                   list) else field_values
+            field_values = field_values + pad_values
+            return np.asarray(field_values)
+        return field_values
 
     def _mask_concepts(self, concepts):
         """
@@ -478,13 +509,11 @@ class HierarchicalMaskedLanguageModelLearningObjective(LearningObjective):
         :return:
         """
         masked_concepts = np.asarray(concepts).copy()
-        output_mask = np.zeros((self._max_num_of_concepts,), dtype=int)
+        output_mask = np.zeros((len(masked_concepts),), dtype=int)
 
         if self._is_training:
-            for word_pos in range(0, len(concepts)):
-                if concepts[word_pos] == self._concept_tokenizer.get_unused_token_id():
-                    break
-
+            # the first position is reserved for cls, so we don't mask the first element
+            for word_pos in range(1, len(concepts)):
                 if random.random() < 0.15:
                     dice = random.random()
                     if dice < 0.8:
@@ -497,6 +526,81 @@ class HierarchicalMaskedLanguageModelLearningObjective(LearningObjective):
                     output_mask[word_pos] = 1
 
         return masked_concepts, output_mask
+
+
+class HierarchicalBertSecondaryLearningObjective(HierarchicalMaskedLanguageModelLearningObjective):
+    required_columns = ['visit_token_ids', 'visit_prolonged_stays', 'is_readmissions']
+
+    def __init__(self, visit_tokenizer: ConceptTokenizer,
+                 max_num_of_visits: int,
+                 is_training: bool):
+        self._visit_tokenizer = visit_tokenizer
+        self._max_num_of_visits = max_num_of_visits
+        self._is_training = is_training
+
+    def get_tf_dataset_schema(self):
+        output_dict_schema = {
+            'visit_predictions': int32,
+            'visit_prolonged_stays': int32,
+            'is_readmissions': int32,
+        }
+        return {}, output_dict_schema
+
+    @validate_columns_decorator
+    def process_batch(self, rows: List[RowSlicer]):
+        """
+        Process a batch of rows to generate input and output data for the learning objective
+        :param rows:
+        :return:
+        """
+        (
+            visit_masks, visit_token_ids, visit_prolonged_stays, is_readmissions
+        ) = zip(*list(map(self._make_record, rows)))
+
+        output_dict = {
+            'visit_predictions': np.stack([visit_token_ids, visit_masks], axis=-1),
+            'visit_prolonged_stays': np.stack([visit_prolonged_stays, visit_masks], axis=-1),
+            'is_readmissions': np.stack([is_readmissions, visit_masks], axis=-1)
+        }
+
+        return {}, output_dict
+
+    def _make_record(self, row_slicer: RowSlicer):
+        """
+        A method for making a bert record for the bert data generator to yield
+
+        :param row_slicer: a tuple containing a pandas row,
+        left_index and right_index for slicing the sequences such as concepts
+
+        :return:
+        """
+
+        row, start_index, end_index, _ = row_slicer
+
+        visit_token_ids = self._pad_visits(row.visit_token_ids[start_index:end_index], '0', False)
+        maksed_visit_tokens, visit_masks = self._mask_visit_concepts(visit_token_ids)
+        visit_prolonged_stays = self._pad_visits(row.visit_prolonged_stays[start_index:end_index],
+                                                 '0', False)
+        is_readmissions = self._pad_visits(row.visit_prolonged_stays[start_index:end_index], '0',
+                                           False)
+        return (
+            maksed_visit_tokens, visit_token_ids, visit_prolonged_stays, is_readmissions
+        )
+
+    def _mask_visit_concepts(self, visit_concepts):
+        """
+        Any visit has 50% chance to be masked
+        :param visit_concepts:
+        :return:
+        """
+        masked_visit_concepts = np.asarray(visit_concepts).copy()
+        output_mask = np.zeros((len(masked_visit_concepts),), dtype=int)
+        if self._is_training:
+            for word_pos in range(0, len(visit_concepts)):
+                if random.random() < 0.5:
+                    output_mask[word_pos] = 1
+                    masked_visit_concepts[word_pos] = self._visit_tokenizer.get_mask_token_id()
+        return masked_visit_concepts, output_mask
 
 
 class TimeAttentionLearningObjective(LearningObjective):

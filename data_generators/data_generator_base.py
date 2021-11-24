@@ -276,12 +276,16 @@ class HierarchicalBertDataGenerator(AbstractDataGeneratorBase):
                  max_num_of_visits: int,
                  max_num_of_concepts: int,
                  sliding_window: int = 10,
+                 min_num_of_concepts: int = 10,
                  *args,
                  **kwargs):
 
+        max_seq_length = max_num_of_visits * max_num_of_concepts
         super(HierarchicalBertDataGenerator, self).__init__(concept_tokenizer=concept_tokenizer,
                                                             max_num_of_visits=max_num_of_visits,
                                                             max_num_of_concepts=max_num_of_concepts,
+                                                            max_seq_length=max_seq_length,
+                                                            min_num_of_concepts=min_num_of_concepts,
                                                             *args, **kwargs)
         self._concept_tokenizer = concept_tokenizer
         self._max_num_of_visits = max_num_of_visits
@@ -309,18 +313,22 @@ class HierarchicalBertDataGenerator(AbstractDataGeneratorBase):
         """
         while True:
             for row in self._training_data.itertuples():
-                for step in range(self._calculate_step(row.num_of_visits)):
-                    start_index = step * self._sliding_window
-                    end_index = step * self._sliding_window + self._max_num_of_visits
-
-                    if end_index > row.num_of_visits:
-                        start_index = row.num_of_visits - self._max_num_of_visits
-                        end_index = row.num_of_visits
-
-                    yield RowSlicer(row, start_index, end_index)
+                # Skip the patient that doesn't have the min number of concepts
+                if row.num_of_concepts >= self._min_num_of_concepts:
+                    # Use a sliding window to slice out a portion of the medical history
+                    for step in range(self._calculate_step(row.num_of_visits)):
+                        end_index = row.num_of_visits - step * self._sliding_window
+                        start_index = max(end_index - self._max_num_of_visits, 0)
+                        yield RowSlicer(row, start_index, end_index)
 
     def estimate_data_size(self):
         return self._training_data.num_of_visits.apply(self._calculate_step).sum()
+
+
+class HierarchicalBertMultiTaskDataGenerator(HierarchicalBertDataGenerator):
+    def _get_learning_objective_classes(self):
+        return [HierarchicalMaskedLanguageModelLearningObjective,
+                HierarchicalBertSecondaryLearningObjective]
 
 
 class MedBertDataGenerator(BertDataGenerator):

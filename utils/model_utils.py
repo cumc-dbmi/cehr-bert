@@ -85,7 +85,8 @@ def tokenize_concepts(training_data: Union[pd_dataframe, dd_dataframe],
                     name='concept_ids'), meta='iterable')
         else:
             training_data[column_name] = training_data[column_name].apply(
-                lambda concept_ids: concept_ids.tolist())
+                lambda concept_ids: concept_ids.tolist() if not isinstance(concept_ids,
+                                                                           list) else concept_ids)
             training_data[tokenized_column_name] = tokenizer.encode(training_data[column_name])
 
     if not os.path.exists(tokenizer_path) or recreate:

@@ -22,18 +22,24 @@ def transformer_hierarchical_bert_model(num_of_visits,
                                         embedding_dropout: float = 0.6,
                                         l2_reg_penalty: float = 1e-4,
                                         time_embeddings_size: int = 16):
-    
-    pat_seq = tf.keras.layers.Input(shape=(num_of_visits, num_of_concepts,), dtype='int32', name='pat_seq')
-    pat_seq_age = tf.keras.layers.Input(shape=(num_of_visits, num_of_concepts,), dtype='int32', name='pat_seq_age')
-    pat_seq_time = tf.keras.layers.Input(shape=(num_of_visits, num_of_concepts,), dtype='int32', name='pat_seq_time')
-    pat_mask = tf.keras.layers.Input(shape=(num_of_visits, num_of_concepts,), dtype='int32', name='pat_mask')
+    pat_seq = tf.keras.layers.Input(shape=(num_of_visits, num_of_concepts,), dtype='int32',
+                                    name='pat_seq')
+    pat_seq_age = tf.keras.layers.Input(shape=(num_of_visits, num_of_concepts,), dtype='int32',
+                                        name='pat_seq_age')
+    pat_seq_time = tf.keras.layers.Input(shape=(num_of_visits, num_of_concepts,), dtype='int32',
+                                         name='pat_seq_time')
+    pat_mask = tf.keras.layers.Input(shape=(num_of_visits, num_of_concepts,), dtype='int32',
+                                     name='pat_mask')
 
-    visit_time_delta_att = tf.keras.layers.Input(shape=(num_of_visits-1,), dtype='int32',
+    visit_segment = tf.keras.layers.Input(shape=(num_of_visits,), dtype='int32',
+                                          name='visit_segment')
+
+    visit_time_delta_att = tf.keras.layers.Input(shape=(num_of_visits - 1,), dtype='int32',
                                                  name='visit_time_delta_att')
     visit_mask = tf.keras.layers.Input(shape=(num_of_visits,), dtype='int32', name='visit_mask')
 
-    default_inputs = [pat_seq, pat_seq_age, pat_seq_time, 
-                      pat_mask, visit_time_delta_att, visit_mask]
+    default_inputs = [pat_seq, pat_seq_age, pat_seq_time, pat_mask,
+                      visit_segment, visit_time_delta_att, visit_mask]
 
     pat_concept_mask = tf.reshape(pat_mask, (-1, num_of_concepts))[:, tf.newaxis, tf.newaxis, :]
 
@@ -45,13 +51,18 @@ def transformer_hierarchical_bert_model(num_of_visits,
     # output the embedding_matrix:
     l2_regularizer = (tf.keras.regularizers.l2(l2_reg_penalty) if l2_reg_penalty else None)
     concept_embedding_layer = ReusableEmbedding(
-        concept_vocab_size, 
+        concept_vocab_size,
         embedding_size,
         name='bpe_embeddings',
         embeddings_regularizer=l2_regularizer
     )
 
-    # # define the time embedding layer for absolute time stamps (since 1970)
+    # define the visit segment layer
+    visit_segment_layer = VisitEmbeddingLayer(visit_order_size=3,
+                                              embedding_size=embedding_size,
+                                              name='visit_segment_layer')
+
+    # define the time embedding layer for absolute time stamps (since 1970)
     time_embedding_layer = TimeEmbeddingLayer(embedding_size=time_embeddings_size,
                                               name='time_embedding_layer')
     # define the age embedding layer for the age w.r.t the medical record
@@ -67,6 +78,9 @@ def transformer_hierarchical_bert_model(num_of_visits,
     pt_seq_time_embeddings = time_embedding_layer(pat_seq_time)
 
     # dense layer for rescale the patient sequence embeddings back to the original size
+    pt_seq_concept_embeddings = visit_segment_layer([visit_segment[:, :, tf.newaxis],
+                                                     pt_seq_concept_embeddings])
+
     temporal_concept_embeddings = temporal_transformation_layer(
         tf.concat([pt_seq_concept_embeddings, pt_seq_age_embeddings, pt_seq_time_embeddings],
                   axis=-1, name='concat_for_encoder'))
@@ -135,13 +149,13 @@ def transformer_hierarchical_bert_model(num_of_visits,
     augmented_visit_embeddings = expanded_visit_embeddings + expanded_att_embeddings
 
     # Second bert applied at the patient level to the visit embeddings
-    visit_encoder = Encoder(name='visit_encoder',
-                            num_layers=depth,
-                            d_model=embeddinig_size,
-                            num_heads=num_heads,
-                            dropout_rate=transformer_dropout)
+    #     visit_encoder = Encoder(name='visit_encoder',
+    #                             num_layers=depth,
+    #                             d_model=embeddinig_size,
+    #                             num_heads=num_heads,
+    #                             dropout_rate=transformer_dropout)
     # Feed augmented visit embeddings into encoders to get contextualized visit embeddings
-    contextualized_visit_embeddings, _ = visit_encoder(
+    contextualized_visit_embeddings, _ = concept_encoder(
         augmented_visit_embeddings,
         visit_concept_mask
     )
@@ -155,6 +169,8 @@ def transformer_hierarchical_bert_model(num_of_visits,
         contextualized_concept_embeddings,
         visit_concept_mask,
         None)
+
+    global_concept_embeddings += contextualized_concept_embeddings
 
     concept_output_layer = TiedOutputEmbedding(
         projection_regularizer=l2_regularizer,
@@ -194,77 +210,36 @@ visit_seq_time_delta = tf.sort(tf.random.uniform((1, 19), dtype=tf.int32, maxval
 visit_mask = tf.sort(tf.random.uniform((1, 20), dtype=tf.int32, maxval=2))
 
 # %%
-num_concept_per_v = 50
-num_visit = 10
-num_seq = num_concept_per_v * num_visit
+# n_of_data_points = 2560
 
-concept_vocab_size = 40000
-visit_vocab_size = 10
+# pat_seq_input = tf.random.uniform((n_of_data_points, num_visit, num_concept_per_v), maxval=100, dtype=tf.int32)
+# pat_seq_age_input = tf.sort(tf.random.uniform((n_of_data_points, num_visit, num_concept_per_v), minval=18, maxval=100, dtype=tf.int32))
+# pat_seq_time_input = tf.sort(tf.random.uniform((n_of_data_points, num_visit, num_concept_per_v), maxval=1000, dtype=tf.int32))
+# pat_mask_input = tf.sort(tf.random.uniform((n_of_data_points, num_visit, num_concept_per_v), maxval=2, dtype=tf.int32))
 
-embeddinig_size = 128
-time_embeddings_size = 16
-depth = 16
-num_heads = 8
-transformer_dropout: float = 0.1
-embedding_dropout: float = 0.6
-l2_regularizer = tf.keras.regularizers.l2(1e-4)
+# visit_time_delta_att_input = tf.sort(tf.random.uniform((n_of_data_points, num_visit - 1), maxval=20, dtype=tf.int32))
+# visit_mask_input = tf.sort(tf.random.uniform((n_of_data_points, num_visit), maxval=2, dtype=tf.int32))
+# inputs = {
+#     'pat_seq': pat_seq_input,
+#     'pat_seq_age': pat_seq_age_input,
+#     'pat_seq_time': pat_seq_time_input,
+#     'pat_mask': pat_mask_input,
+#     'visit_time_delta_att': visit_time_delta_att_input,
+#     'visit_mask': visit_mask_input
+# }
 
+# concepts_types = tf.sort(tf.random.uniform((n_of_data_points, num_seq), maxval=10, dtype=tf.int32))
+# output_mask = tf.sort(tf.random.uniform((n_of_data_points, num_seq), maxval=2, dtype=tf.int32))
+
+# visit_types = tf.sort(tf.random.uniform((n_of_data_points, num_visit), maxval=10, dtype=tf.int32))
+# output_visit_mask = tf.sort(tf.random.uniform((n_of_data_points, num_visit), maxval=2, dtype=tf.int32))
+
+# output_dict = {
+#     'concept_predictions': np.stack([concepts_types, output_mask], axis=-1),
+#     'visit_predictions': np.stack([visit_types, output_visit_mask], axis=-1)
+# }
 # %%
-strategy = tf.distribute.MirroredStrategy()
-with strategy.scope():
-    model = transformer_hierarchical_bert_model(num_visit,
-                                            num_concept_per_v,
-                                            tokenizer.get_vocab_size(),
-                                            visit_tokenizer.get_vocab_size(),
-                                            embeddinig_size,
-                                            depth,
-                                            num_heads)
-
-# %%
-model.summary()
-
-# %%
-optimizer = tf.optimizers.Adam(
-    learning_rate=2e-4, beta_1=0.9, beta_2=0.999)
-
-losses = {
-    'concept_predictions': MaskedPenalizedSparseCategoricalCrossentropy(0.1),
-    'visit_predictions': MaskedPenalizedSparseCategoricalCrossentropy(0.1)
-}
-
-model.compile(optimizer, loss=losses, metrics={'concept_predictions': masked_perplexity})
-
-# %%
-n_of_data_points = 2560
-
-pat_seq_input = tf.random.uniform((n_of_data_points, num_visit, num_concept_per_v), maxval=100, dtype=tf.int32)
-pat_seq_age_input = tf.sort(tf.random.uniform((n_of_data_points, num_visit, num_concept_per_v), minval=18, maxval=100, dtype=tf.int32))
-pat_seq_time_input = tf.sort(tf.random.uniform((n_of_data_points, num_visit, num_concept_per_v), maxval=1000, dtype=tf.int32))
-pat_mask_input = tf.sort(tf.random.uniform((n_of_data_points, num_visit, num_concept_per_v), maxval=2, dtype=tf.int32))
-
-visit_time_delta_att_input = tf.sort(tf.random.uniform((n_of_data_points, num_visit - 1), maxval=20, dtype=tf.int32))
-visit_mask_input = tf.sort(tf.random.uniform((n_of_data_points, num_visit), maxval=2, dtype=tf.int32))
-inputs = {
-    'pat_seq': pat_seq_input,
-    'pat_seq_age': pat_seq_age_input,
-    'pat_seq_time': pat_seq_time_input,
-    'pat_mask': pat_mask_input,
-    'visit_time_delta_att': visit_time_delta_att_input,
-    'visit_mask': visit_mask_input
-}
-
-concepts_types = tf.sort(tf.random.uniform((n_of_data_points, num_seq), maxval=10, dtype=tf.int32))
-output_mask = tf.sort(tf.random.uniform((n_of_data_points, num_seq), maxval=2, dtype=tf.int32))
-
-visit_types = tf.sort(tf.random.uniform((n_of_data_points, num_visit), maxval=10, dtype=tf.int32))
-output_visit_mask = tf.sort(tf.random.uniform((n_of_data_points, num_visit), maxval=2, dtype=tf.int32))
-
-output_dict = {
-    'concept_predictions': np.stack([concepts_types, output_mask], axis=-1),
-    'visit_predictions': np.stack([visit_types, output_visit_mask], axis=-1)
-}
-# %%
-dataset = tf.data.Dataset.from_tensor_slices((inputs, output_dict)).cache().batch(8)
+# dataset = tf.data.Dataset.from_tensor_slices((inputs, output_dict)).cache().batch(8)
 
 # %%
 # for x, y in dataset:
@@ -272,13 +247,13 @@ dataset = tf.data.Dataset.from_tensor_slices((inputs, output_dict)).cache().batc
 #     break
 
 # %%
-model.fit(dataset)
+# model.fit(dataset)
 
 # %%
 import os
 import pandas as pd
-from data_generators.data_generator_base import HierarchicalBertDataGenerator
 from utils.model_utils import *
+from data_generators.data_generator_base import *
 
 # %%
 output_folder = '/data/research_ops/omops/omop_2020q2/hierarchical_bert'
@@ -287,10 +262,11 @@ tokenizer_path = os.path.join(output_folder, 'concept_tokenizer.pickle')
 visit_tokenizer_path = os.path.join(output_folder, 'visit_tokenizer.pickle')
 
 # %%
-patient_sequence['patient_concept_ids'] = patient_sequence.concept_ids.apply(lambda visit_concepts: np.hstack(visit_concepts))
+patient_sequence['patient_concept_ids'] = patient_sequence.concept_ids \
+    .apply(lambda visit_concepts: np.hstack(visit_concepts))
+
 
 # %%
-from data_generators.data_generator_base import *
 class HierarchicalBertDataGenerator(AbstractDataGeneratorBase):
 
     def __init__(self,
@@ -300,7 +276,7 @@ class HierarchicalBertDataGenerator(AbstractDataGeneratorBase):
                  sliding_window: int = 10,
                  *args,
                  **kwargs):
-        
+
         super(HierarchicalBertDataGenerator, self).__init__(concept_tokenizer=concept_tokenizer,
                                                             max_num_of_visits=max_num_of_visits,
                                                             max_num_of_concepts=max_num_of_concepts,
@@ -323,7 +299,7 @@ class HierarchicalBertDataGenerator(AbstractDataGeneratorBase):
             return 1
         else:
             return math.ceil((num_of_visits - self._max_num_of_visits) / self._sliding_window) + 1
-        
+
     def _create_iterator(self):
         """
         Create an iterator that will iterate forever
@@ -331,17 +307,17 @@ class HierarchicalBertDataGenerator(AbstractDataGeneratorBase):
         """
         while True:
             for row in self._training_data.itertuples():
-#                 for step in range(self._calculate_step(row.num_of_visits)):
-# #                     end_index = row.num_of_visits - step * self._sliding_window
-# #                     start_index = max(end_index - self._max_num_of_visits, 0)
-#                     start_index = step * self._sliding_window
-#                     end_index = step * self._sliding_window + self._max_num_of_visits
+                for step in range(self._calculate_step(row.num_of_visits)):
+                    end_index = row.num_of_visits - step * self._sliding_window
+                    start_index = max(end_index - self._max_num_of_visits, 0)
+                    #                     start_index = step * self._sliding_window
+                    #                     end_index = step * self._sliding_window + self._max_num_of_visits
 
-#                     if end_index > row.num_of_visits:
-#                         start_index = row.num_of_visits - self._max_num_of_visits
-#                         end_index = row.num_of_visits
-                        
-                yield RowSlicer(row, 0, self._max_num_of_visits)
+                    #                     if end_index > row.num_of_visits:
+                    #                         start_index = row.num_of_visits - self._max_num_of_visits
+                    #                         end_index = row.num_of_visits
+
+                    yield RowSlicer(row, start_index, end_index)
 
     def estimate_data_size(self):
         return self._training_data.num_of_visits.apply(self._calculate_step).sum()
@@ -352,7 +328,7 @@ class HierarchicalMaskedLanguageModelLearningObjective(LearningObjective):
     required_columns = ['concept_ids', 'dates',
                         'visit_segments', 'ages',
                         'visit_dates', 'visit_masks',
-                        'visit_concept_ids', 'time_interval_atts']
+                        'visit_token_ids', 'time_interval_atts']
 
     def __init__(self, concept_tokenizer: ConceptTokenizer,
                  max_num_of_visits: int,
@@ -373,7 +349,8 @@ class HierarchicalMaskedLanguageModelLearningObjective(LearningObjective):
             'visit_time_delta_att': int32,
             'visit_mask': int32
         }
-        output_dict_schema = {'concept_predictions': int32, 'visit_predictions': int32}
+        output_dict_schema = {'concept_predictions': int32,
+                              'visit_predictions': int32}
         return input_dict_schema, output_dict_schema
 
     def _pad(self, x, padded_token):
@@ -389,22 +366,23 @@ class HierarchicalMaskedLanguageModelLearningObjective(LearningObjective):
 
         (
             output_concept_masks, masked_concepts, concepts, dates, ages,
-            visit_concept_ids, visit_segments, visit_dates, visit_masks, time_interval_atts
+            visit_token_ids, visit_segments, visit_dates, visit_masks, time_interval_atts
         ) = zip(*list(map(self._make_record, rows)))
 
         unused_token_id = self._concept_tokenizer.get_unused_token_id()
 
         # The main inputs for bert
         masked_concepts = np.stack(pd.Series(masked_concepts) \
-            .apply(convert_to_list_of_lists) \
-            .apply(self._concept_tokenizer.encode) \
-            .apply(lambda tokens: self._pad(tokens, padded_token=unused_token_id)))
-        
+                                   .apply(convert_to_list_of_lists) \
+                                   .apply(self._concept_tokenizer.encode) \
+                                   .apply(
+            lambda tokens: self._pad(tokens, padded_token=unused_token_id)))
+
         concepts = np.stack(pd.Series(concepts) \
-            .apply(convert_to_list_of_lists) \
-            .apply(self._concept_tokenizer.encode) \
-            .apply(lambda tokens: self._pad(tokens, padded_token=unused_token_id)))
-        
+                            .apply(convert_to_list_of_lists) \
+                            .apply(self._concept_tokenizer.encode) \
+                            .apply(lambda tokens: self._pad(tokens, padded_token=unused_token_id)))
+
         pat_mask = (masked_concepts == unused_token_id).astype(int)
 
         time_interval_atts = np.asarray(
@@ -412,11 +390,11 @@ class HierarchicalMaskedLanguageModelLearningObjective(LearningObjective):
                 np.stack(time_interval_atts).tolist()
             )
         )
-        
+
         visit_masks = np.stack(visit_masks)
-        
+
         visit_segments = np.stack(visit_segments)
-        
+
         # The auxiliary inputs for bert
         dates = np.stack(
             pd.Series(dates) \
@@ -437,12 +415,19 @@ class HierarchicalMaskedLanguageModelLearningObjective(LearningObjective):
                       'visit_segment': visit_segments,
                       'visit_time_delta_att': time_interval_atts,
                       'visit_mask': visit_masks}
-        
+
+        output_concept_masks = np.stack(
+            pd.Series(output_concept_masks) \
+                .apply(convert_to_list_of_lists) \
+                .apply(lambda masks: self._pad(masks, padded_token=0))
+        )
+
         concepts = np.reshape(concepts, (-1, self._max_num_of_concepts * self._max_num_of_visits))
-        output_concept_masks = np.reshape(output_concept_masks, (-1, self._max_num_of_concepts * self._max_num_of_visits))
-        output_visit_masks = np.ones_like(visit_concept_ids)
-        output_dict = {'concept_predictions': np.stack([concepts, output_concept_masks],axis=-1),
-                       'visit_predictions': np.stack([visit_concept_ids, output_visit_masks],
+        output_concept_masks = np.reshape(output_concept_masks,
+                                          (-1, self._max_num_of_concepts * self._max_num_of_visits))
+        output_visit_masks = np.ones_like(visit_token_ids)
+        output_dict = {'concept_predictions': np.stack([concepts, output_concept_masks], axis=-1),
+                       'visit_predictions': np.stack([visit_token_ids, output_visit_masks],
                                                      axis=-1)}
 
         return input_dict, output_dict
@@ -459,23 +444,38 @@ class HierarchicalMaskedLanguageModelLearningObjective(LearningObjective):
 
         row, start_index, end_index, _ = row_slicer
 
-        concepts = row.concept_ids[start_index:end_index]
-        dates = row.dates[start_index:end_index]
-        ages = row.ages[start_index:end_index]
-        visit_segments = row.visit_segments[start_index:end_index]
-        visit_dates = row.visit_dates[start_index:end_index]
-        visit_masks = row.visit_masks[start_index:end_index]
-        visit_concept_ids = row.visit_concept_ids[start_index:end_index]
+        concepts = self._pad_visits(row.concept_ids[start_index:end_index], '0')
+        dates = self._pad_visits(row.dates[start_index:end_index], 0)
+        ages = self._pad_visits(row.ages[start_index:end_index], 0)
+        visit_segments = self._pad_visits(row.visit_segments[start_index:end_index], 0, False)
+        visit_dates = self._pad_visits(row.visit_dates[start_index:end_index], 0, False)
+        visit_masks = self._pad_visits(row.visit_masks[start_index:end_index], 1, False)
+        visit_token_ids = self._pad_visits(row.visit_token_ids[start_index:end_index], '0', False)
         # Skip the first element because there is no time interval for it
-        time_interval_atts = row.time_interval_atts[start_index + 1:end_index]
+        time_interval_atts = self._pad_visits(row.time_interval_atts[start_index:end_index], '0',
+                                              False)[1:]
 
         masked_concepts, output_concept_masks = zip(
             *list(map(self._mask_concepts, concepts)))
 
         return (
             output_concept_masks, masked_concepts, concepts, dates, ages,
-            visit_concept_ids, visit_segments, visit_dates, visit_masks, time_interval_atts
+            visit_token_ids, visit_segments, visit_dates, visit_masks, time_interval_atts
         )
+
+    def _pad_visits(self, field_values, pad_value, is_visit_level=True):
+        total_num_visits = len(field_values)
+        if total_num_visits < self._max_num_of_visits:
+            num_of_pads = self._max_num_of_visits - total_num_visits
+            if is_visit_level:
+                pad_values = [np.asarray([pad_value])] * num_of_pads
+            else:
+                pad_values = [pad_value] * num_of_pads
+            field_values = field_values.tolist() if not isinstance(field_values,
+                                                                   list) else field_values
+            field_values = field_values + pad_values
+            return np.asarray(field_values)
+        return field_values
 
     def _mask_concepts(self, concepts):
         """
@@ -484,14 +484,14 @@ class HierarchicalMaskedLanguageModelLearningObjective(LearningObjective):
         :return:
         """
         masked_concepts = np.asarray(concepts).copy()
-        output_mask = np.zeros((self._max_num_of_concepts,), dtype=int)
+        output_mask = np.zeros((len(masked_concepts),), dtype=int)
 
         if self._is_training:
-            # the first position is reserved for cls, so we don't mask the first element           
+            # the first position is reserved for cls, so we don't mask the first element
             for word_pos in range(1, len(concepts)):
                 if concepts[word_pos] == self._concept_tokenizer.get_unused_token_id():
                     break
-                
+
                 if random.random() < 0.15:
                     dice = random.random()
                     if dice < 0.8:
@@ -510,7 +510,7 @@ class HierarchicalMaskedLanguageModelLearningObjective(LearningObjective):
 tokenizer = tokenize_concepts(patient_sequence,
                               'patient_concept_ids',
                               None,
-                              tokenizer_path, 
+                              tokenizer_path,
                               encode=False)
 
 # %%
@@ -518,34 +518,67 @@ tokenizer.fit_on_concept_sequences(patient_sequence.time_interval_atts)
 
 # %%
 visit_tokenizer = tokenize_concepts(patient_sequence,
-                              'visit_concept_ids',
-                              'visit_token_ids',
-                              visit_tokenizer_path)
+                                    'visit_concept_ids',
+                                    'visit_token_ids',
+                                    visit_tokenizer_path)
 
 # %%
-
-# %%
-bert_data_generator = HierarchicalBertDataGenerator(training_data=patient_sequence, 
-                                                    concept_tokenizer=tokenizer, 
-                                                    visit_tokenizer=visit_tokenizer, 
-                                                    max_num_of_visits=10, 
-                                                    max_num_of_concepts=50, 
-                                                    sliding_window=10, 
-                                                    batch_size=8, 
-                                                    max_seq_len=20*50, 
+bert_data_generator = HierarchicalBertDataGenerator(training_data=patient_sequence,
+                                                    concept_tokenizer=tokenizer,
+                                                    visit_tokenizer=visit_tokenizer,
+                                                    max_num_of_visits=20,
+                                                    max_num_of_concepts=40,
+                                                    sliding_window=10,
+                                                    batch_size=16,
+                                                    max_seq_len=10 * 50,
                                                     min_num_of_concepts=10)
-
-# %%
-batch_generator = bert_data_generator.create_batch_generator()
 
 # %%
 steps_per_epoch = bert_data_generator.get_steps_per_epoch()
 dataset = tf.data.Dataset.from_generator(bert_data_generator.create_batch_generator,
-                                     output_types=(bert_data_generator.get_tf_dataset_schema())) \
-    .prefetch(tf.data.experimental.AUTOTUNE)
+                                         output_types=(bert_data_generator.get_tf_dataset_schema())) \
+    .prefetch(128)
 
 # %%
-history = model.fit(dataset, 
+num_concept_per_v = 40
+num_visit = 20
+num_seq = num_concept_per_v * num_visit
+
+concept_vocab_size = 40000
+visit_vocab_size = 10
+
+embeddinig_size = 128
+time_embeddings_size = 16
+depth = 16
+num_heads = 8
+transformer_dropout: float = 0.1
+embedding_dropout: float = 0.6
+l2_regularizer = tf.keras.regularizers.l2(1e-4)
+
+strategy = tf.distribute.MirroredStrategy()
+with strategy.scope():
+    model = transformer_hierarchical_bert_model(num_visit,
+                                                num_concept_per_v,
+                                                tokenizer.get_vocab_size(),
+                                                visit_tokenizer.get_vocab_size(),
+                                                embeddinig_size,
+                                                depth,
+                                                num_heads)
+
+# model.summary()
+
+optimizer = tf.optimizers.Adam(
+    learning_rate=2e-4, beta_1=0.9, beta_2=0.999)
+
+losses = {
+    'concept_predictions': MaskedPenalizedSparseCategoricalCrossentropy(0.1),
+    'visit_predictions': MaskedPenalizedSparseCategoricalCrossentropy(0.1)
+}
+
+model.compile(optimizer, loss=losses, metrics={'concept_predictions': masked_perplexity})
+
+# %%
+history = model.fit(dataset,
                     steps_per_epoch=steps_per_epoch,
                     epochs=1)
 

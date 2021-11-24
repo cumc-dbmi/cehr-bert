@@ -1,5 +1,6 @@
 from os import path
 
+import math
 import pyspark.sql.functions as F
 import pyspark.sql.types as T
 from pyspark.sql import Window as W
@@ -17,6 +18,16 @@ DOMAIN_KEY_FIELDS = {
 }
 
 LOGGER = logging.getLogger(__name__)
+
+
+def time_token_func(time_delta):
+    if time_delta < 0:
+        return 'W-1'
+    if time_delta < 28:
+        return f'W{str(math.floor(time_delta / 7))}'
+    if time_delta < 360:
+        return f'M{str(math.floor(time_delta / 30))}'
+    return 'LT'
 
 
 def get_key_fields(domain_table):
@@ -417,6 +428,57 @@ def create_sequence_data(patient_event,
     return patient_grouped_events.select(columns_for_output)
 
 
+def create_hierarchical_sequence_data(patient_event, date_filter=None):
+    if date_filter:
+        patient_event = patient_event.where(F.col('date').cast('date') >= date_filter)
+
+    weeks_since_epoch_udf = (F.unix_timestamp('date') / F.lit(24 * 60 * 60 * 7)).cast('int')
+    # Compute the time difference between the current record and the previous record
+    visit_date_udf = F.first('days_since_epoch').over(
+        W.partitionBy('cohort_member_id', 'person_id', 'visit_occurrence_id').orderBy(
+            'days_since_epoch'))
+    # Udf for calculating the time token
+    visit_rank_udf = F.dense_rank().over(
+        W.partitionBy('cohort_member_id', 'person_id').orderBy('visit_start_date'))
+    visit_segment_udf = F.col('visit_rank_order') % F.lit(2) + 1
+
+    patient_event = patient_event \
+        .withColumn('date', F.col('date').cast('date')) \
+        .withColumn('date_in_week', weeks_since_epoch_udf) \
+        .withColumn('visit_start_date', visit_date_udf) \
+        .withColumn('visit_rank_order', visit_rank_udf) \
+        .withColumn('visit_segment', visit_segment_udf)
+
+    visit_concept_order_udf = F.row_number().over(
+        W.partitionBy('cohort_member_id',
+                      'person_id',
+                      'visit_occurrence_id').orderBy('date', 'standard_concept_id'))
+
+    struct_columns = ['visit_concept_order', 'standard_concept_id']
+    output_columns = ['cohort_member_id', 'person_id', 'concept_ids', 'visit_segments',
+                      'orders', 'dates', 'ages', 'visit_concept_orders', 'num_of_visits',
+                      'num_of_concepts']
+
+    patient_event \
+        .withColumn('visit_concept_order', visit_concept_order_udf) \
+        .withColumn('visit_struct_data', F.struct(struct_columns)) \
+        .groupBy('cohort_member_id', 'person_id', 'visit_occurrence_id') \
+        .agg(F.sort_array(F.collect_set('visit_struct_data')).alias('visit_struct_data')) \
+        .withColumn('orders', F.col('visit_struct_data.order').cast(T.ArrayType(T.IntegerType()))) \
+        .withColumn('dates', F.col('data_for_sorting.date_in_week')) \
+        .withColumn('concept_ids', F.col('data_for_sorting.standard_concept_id')) \
+        .withColumn('visit_segments', F.col('data_for_sorting.visit_segment')) \
+        .withColumn('ages', F.col('data_for_sorting.age')) \
+        .withColumn('visit_concept_orders', F.col('data_for_sorting.visit_rank_order'))
+
+    # If include_visit_type is enabled, we add additional information to the default output
+    patient_grouped_events = patient_grouped_events \
+        .withColumn('visit_concept_ids', F.col('data_for_sorting.visit_concept_id'))
+    output_columns.append('visit_concept_ids')
+
+    return patient_grouped_events.select(output_columns)
+
+
 def create_sequence_data_with_att(patient_event, date_filter=None,
                                   include_visit_type=False,
                                   exclude_visit_tokens=False):
@@ -429,18 +491,6 @@ def create_sequence_data_with_att(patient_event, date_filter=None,
     :param exclude_visit_tokens:
     :return:
     """
-
-    import math
-
-    def time_token_func(time_delta):
-        if time_delta < 0:
-            return 'W-1'
-        if time_delta < 28:
-            return f'W{str(math.floor(time_delta / 7))}'
-        if time_delta < 360:
-            return f'M{str(math.floor(time_delta / 30))}'
-        return 'LT'
-
     if date_filter:
         patient_event = patient_event.where(F.col('date').cast('date') >= date_filter)
 
