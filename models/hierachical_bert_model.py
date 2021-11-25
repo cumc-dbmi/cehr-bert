@@ -5,7 +5,6 @@ import numpy as np
 def transformer_hierarchical_bert_model(num_of_visits,
                                         num_of_concepts,
                                         concept_vocab_size,
-                                        visit_vocab_size,
                                         embedding_size,
                                         depth: int,
                                         num_heads: int,
@@ -13,7 +12,30 @@ def transformer_hierarchical_bert_model(num_of_visits,
                                         embedding_dropout: float = 0.6,
                                         l2_reg_penalty: float = 1e-4,
                                         time_embeddings_size: int = 16,
-                                        include_secdonary_learning_objective: bool = False):
+                                        include_second_tiered_learning_objectives: bool = False,
+                                        visit_vocab_size: int = None):
+    """
+    Create a hierarchical bert model
+
+    :param num_of_visits:
+    :param num_of_concepts:
+    :param concept_vocab_size:
+    :param embedding_size:
+    :param depth:
+    :param num_heads:
+    :param transformer_dropout:
+    :param embedding_dropout:
+    :param l2_reg_penalty:
+    :param time_embeddings_size:
+    :param include_second_tiered_learning_objectives:
+    :param visit_vocab_size:
+    :return:
+    """
+    # If the second tiered learning objectives are enabled, visit_vocab_size needs to be provided
+    if include_second_tiered_learning_objectives and not visit_vocab_size:
+        raise RuntimeError(f'visit_vocab_size can not be null '
+                           f'when the second learning objectives are enabled')
+
     pat_seq = tf.keras.layers.Input(shape=(num_of_visits, num_of_concepts,), dtype='int32',
                                     name='pat_seq')
     pat_seq_age = tf.keras.layers.Input(shape=(num_of_visits, num_of_concepts,), dtype='int32',
@@ -179,12 +201,12 @@ def transformer_hierarchical_bert_model(num_of_visits,
 
     outputs = [concept_predictions]
 
-    if include_secdonary_learning_objective:
+    if include_second_tiered_learning_objectives:
         visit_prediction_dense = tf.keras.layers.Dense(visit_vocab_size,
                                                        name='visit_prediction_dense')
-        is_readmission_prediction_dense = tf.keras.layers.Dense(1, activation='sigmoid',
+        is_readmission_prediction_dense = tf.keras.layers.Dense(2, activation='sigmoid',
                                                                 name='is_readmissions')
-        prolonged_length_stay_prediction_dense = tf.keras.layers.Dense(1, activation='sigmoid',
+        prolonged_length_stay_prediction_dense = tf.keras.layers.Dense(2, activation='sigmoid',
                                                                        name='visit_prolonged_stays')
         visit_softmax_layer = tf.keras.layers.Softmax(name='visit_predictions')
 

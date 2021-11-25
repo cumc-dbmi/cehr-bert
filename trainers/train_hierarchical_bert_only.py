@@ -97,39 +97,43 @@ class HierarchicalBertTrainer(AbstractConceptEmbeddingTrainer):
                 optimizer = optimizers.Adam(lr=self._learning_rate,
                                             beta_1=0.9,
                                             beta_2=0.999)
+                visit_vocab_size = (
+                    self._visit_tokenizer.get_vocab_size() if
+                    self._include_visit_prediction else None
+                )
 
                 model = transformer_hierarchical_bert_model(
                     num_of_visits=self._max_num_visits,
                     num_of_concepts=self._max_num_concepts,
                     concept_vocab_size=self._tokenizer.get_vocab_size(),
-                    visit_vocab_size=self._visit_tokenizer.get_vocab_size(),
+                    visit_vocab_size=visit_vocab_size,
                     embedding_size=self._embedding_size,
                     depth=self._depth,
                     num_heads=self._num_heads,
                     time_embeddings_size=self._time_embeddings_size,
-                    include_secdonary_learning_objective=self.
-                    _include_visit_prediction)
+                    include_second_tiered_learning_objectives=self._include_visit_prediction
+                )
 
                 if self._include_visit_prediction:
                     losses = {
                         'concept_predictions':
-                        MaskedPenalizedSparseCategoricalCrossentropy(
-                            self.confidence_penalty),
+                            MaskedPenalizedSparseCategoricalCrossentropy(
+                                self.confidence_penalty),
                         'visit_predictions':
-                        MaskedPenalizedSparseCategoricalCrossentropy(
-                            self.confidence_penalty),
+                            MaskedPenalizedSparseCategoricalCrossentropy(
+                                self.confidence_penalty),
                         'is_readmissions':
-                        MaskedPenalizedSparseCategoricalCrossentropy(
-                            self.confidence_penalty),
+                            MaskedPenalizedSparseCategoricalCrossentropy(
+                                self.confidence_penalty),
                         'visit_prolonged_stays':
-                        MaskedPenalizedSparseCategoricalCrossentropy(
-                            self.confidence_penalty)
+                            MaskedPenalizedSparseCategoricalCrossentropy(
+                                self.confidence_penalty)
                     }
                 else:
                     losses = {
                         'concept_predictions':
-                        MaskedPenalizedSparseCategoricalCrossentropy(
-                            self.confidence_penalty)
+                            MaskedPenalizedSparseCategoricalCrossentropy(
+                                self.confidence_penalty)
                     }
 
                 model.compile(
