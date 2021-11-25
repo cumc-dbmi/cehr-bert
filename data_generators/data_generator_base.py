@@ -295,12 +295,12 @@ class HierarchicalBertDataGenerator(AbstractDataGeneratorBase):
                  *args,
                  **kwargs):
 
-        max_seq_length = max_num_of_visits * max_num_of_concepts
+        max_seq_len = max_num_of_visits * max_num_of_concepts
         super(HierarchicalBertDataGenerator,
               self).__init__(concept_tokenizer=concept_tokenizer,
                              max_num_of_visits=max_num_of_visits,
                              max_num_of_concepts=max_num_of_concepts,
-                             max_seq_length=max_seq_length,
+                             max_seq_len=max_seq_len,
                              min_num_of_concepts=min_num_of_concepts,
                              *args,
                              **kwargs)
