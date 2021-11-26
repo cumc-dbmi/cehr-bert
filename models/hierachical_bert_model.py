@@ -163,13 +163,14 @@ def transformer_hierarchical_bert_model(num_of_visits,
     augmented_visit_embeddings = expanded_visit_embeddings + expanded_att_embeddings
 
     # Second bert applied at the patient level to the visit embeddings
-    #     visit_encoder = Encoder(name='visit_encoder',
-    #                             num_layers=depth,
-    #                             d_model=embeddinig_size,
-    #                             num_heads=num_heads,
-    #                             dropout_rate=transformer_dropout)
+    visit_encoder = Encoder(name='visit_encoder',
+                            num_layers=depth,
+                            d_model=embedding_size,
+                            num_heads=num_heads,
+                            dropout_rate=transformer_dropout)
+
     # Feed augmented visit embeddings into encoders to get contextualized visit embeddings
-    contextualized_visit_embeddings, _ = concept_encoder(
+    contextualized_visit_embeddings, _ = visit_encoder(
         augmented_visit_embeddings,
         visit_concept_mask
     )
