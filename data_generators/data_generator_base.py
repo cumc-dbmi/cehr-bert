@@ -98,6 +98,7 @@ class AbstractDataGeneratorBase(ABC):
         Initialize a list of LearningObjectives used for generating the input and and output
         :return:
         """
+
         def _initialize(learning_objective) -> LearningObjective:
             """
             Initialize one LearningObjective using the provided keyword arguments
@@ -109,7 +110,7 @@ class AbstractDataGeneratorBase(ABC):
             learning_object_input = dict()
             params = get_required_params(learning_objective)
             for required_param in [
-                    param['name'] for param in params if param['required']
+                param['name'] for param in params if param['required']
             ]:
                 if required_param in kwargs:
                     learning_object_input[required_param] = kwargs[
@@ -149,6 +150,7 @@ class AbstractDataGeneratorBase(ABC):
         Create the batch generator for tf.dataset.from_generator to use
         :return:
         """
+
         def filter_lambda(row_slicer):
             """
             Filter out the row_slicer whose concept_ids are less than min_num_of_concepts
@@ -256,8 +258,8 @@ class BertDataGenerator(AbstractDataGeneratorBase):
                 if self._is_training:
                     cursor = random.randint(0, seq_length -
                                             1) if self._is_random_cursor & (
-                                                seq_length > self._max_seq_len
-                                            ) else seq_length // 2
+                            seq_length > self._max_seq_len
+                    ) else seq_length // 2
 
                     half_window_size = int(self._max_seq_len / 2)
                     start_index = max(0, cursor - half_window_size)
@@ -341,7 +343,8 @@ class HierarchicalBertDataGenerator(AbstractDataGeneratorBase):
                         yield RowSlicer(row, start_index, end_index)
 
     def estimate_data_size(self):
-        return self._training_data.num_of_visits.apply(
+        return self._training_data[
+            self._training_data.num_of_concepts >= self._min_num_of_concepts].num_of_visits.apply(
             self._calculate_step).sum()
 
 
@@ -384,8 +387,8 @@ class TemporalBertDataGenerator(BertDataGenerator):
                 if self._is_training:
                     cursor = random.randint(0, seq_length -
                                             1) if self._is_random_cursor & (
-                                                seq_length > self._max_seq_len
-                                            ) else seq_length // 2
+                            seq_length > self._max_seq_len
+                    ) else seq_length // 2
 
                     # Only include the concepts whose time stamps are within -half_time_window and
                     # half_time_window from the target time stamp
