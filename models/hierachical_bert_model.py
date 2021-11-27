@@ -177,24 +177,28 @@ def transformer_hierarchical_bert_model(num_of_visits,
 
     # Use a multi head attention layer to generate the global concept embeddings by attending to
     # the visit embeddings
-    decoder_layer = DecoderLayer(d_model=embedding_size, num_heads=num_heads, dff=512)
-
-    global_concept_embeddings, _, _ = decoder_layer(
-        contextualized_concept_embeddings,
-        contextualized_visit_embeddings,
-        tf.reshape(pat_mask, (-1, num_of_visits * num_of_concepts))[:, :, tf.newaxis],
-        visit_concept_mask
-    )
-
-    # multi_head_attention_layer = MultiHeadAttention(embedding_size, num_heads)
-    # global_concept_embeddings, _ = multi_head_attention_layer(
-    #     contextualized_visit_embeddings,
-    #     contextualized_visit_embeddings,
+    # decoder_layer = DecoderLayer(d_model=embedding_size, num_heads=num_heads, dff=512)
+    #
+    # global_concept_embeddings, _, _ = decoder_layer(
     #     contextualized_concept_embeddings,
-    #     visit_concept_mask,
-    #     None)
+    #     contextualized_visit_embeddings,
+    #     tf.reshape(pat_mask, (-1, num_of_visits * num_of_concepts))[:, :, tf.newaxis],
+    #     visit_concept_mask
+    # )
 
-    # global_concept_embeddings += contextualized_concept_embeddings
+    multi_head_attention_layer = MultiHeadAttention(embedding_size, num_heads)
+    global_concept_embeddings, _ = multi_head_attention_layer(
+        contextualized_visit_embeddings,
+        contextualized_visit_embeddings,
+        contextualized_concept_embeddings,
+        visit_concept_mask,
+        None)
+
+    global_concept_embeddings_normalization = tf.keras.layers.LayerNormalization(epsilon=1e-6)
+
+    global_concept_embeddings = global_concept_embeddings_normalization(
+        global_concept_embeddings + contextualized_concept_embeddings
+    )
 
     concept_output_layer = TiedOutputEmbedding(
         projection_regularizer=l2_regularizer,

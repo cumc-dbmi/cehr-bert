@@ -96,7 +96,9 @@ class HierarchicalBertTrainer(AbstractConceptEmbeddingTrainer):
             else:
                 optimizer = optimizers.Adam(lr=self._learning_rate,
                                             beta_1=0.9,
-                                            beta_2=0.999)
+                                            beta_2=0.999,
+                                            epsilon=1e-5,
+                                            clipnorm=1.0)
                 visit_vocab_size = (
                     self._visit_tokenizer.get_vocab_size() if
                     self._include_visit_prediction else None
