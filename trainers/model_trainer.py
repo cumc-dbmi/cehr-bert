@@ -122,9 +122,10 @@ class AbstractConceptEmbeddingTrainer(AbstractModel):
         """
         data_generator = self.create_data_generator()
         steps_per_epoch = data_generator.get_steps_per_epoch()
-        dataset = tf.data.Dataset.from_generator(data_generator.create_batch_generator,
-                                                 output_types=(
-                                                     data_generator.get_tf_dataset_schema()))
+        dataset = tf.data.Dataset.from_generator(
+            data_generator.create_batch_generator,
+            output_types=(data_generator.get_tf_dataset_schema())
+        ).prefetch(tf.data.experimental.AUTOTUNE)
 
         if self._cache_dataset:
             dataset = dataset.take(data_generator.get_steps_per_epoch()).cache().repeat()
