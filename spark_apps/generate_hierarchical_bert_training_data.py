@@ -11,6 +11,7 @@ from utils.spark_utils import *
 
 VISIT_OCCURRENCE = 'visit_occurrence'
 PERSON = 'person'
+UNKNOWN_CONCEPT = '[UNKNOWN]'
 
 
 def create_hierarchical_sequence_data(person, visit_occurrence, patient_event,
@@ -26,12 +27,17 @@ def create_hierarchical_sequence_data(person, visit_occurrence, patient_event,
 
     visit_columns = [visit_occurrence_person[fieldName] for fieldName in
                      visit_occurrence_person.schema.fieldNames()]
+
     patient_columns = [
-        F.coalesce(patient_event['standard_concept_id'], F.lit(0)).alias('standard_concept_id'),
-        F.coalesce(patient_event['date'], visit_occurrence['visit_start_date']).alias('date'),
+        F.coalesce(patient_event['standard_concept_id'], F.lit(UNKNOWN_CONCEPT)).alias(
+            'standard_concept_id'),
+        F.coalesce(patient_event['date'],
+                   visit_occurrence['visit_start_date']).alias('date'),
         F.coalesce(patient_event['domain'], F.lit('unknown')).alias('domain')]
 
-    patient_event = visit_occurrence_person.join(patient_event, 'visit_occurrence_id', 'left_outer') \
+    patient_event = visit_occurrence_person.join(patient_event,
+                                                 'visit_occurrence_id',
+                                                 'left_outer') \
         .select(visit_columns + patient_columns) \
         .withColumn('standard_concept_id', F.col('standard_concept_id').cast('string')) \
         .withColumn('cohort_member_id', F.col('person_id')) \
@@ -41,8 +47,9 @@ def create_hierarchical_sequence_data(person, visit_occurrence, patient_event,
     weeks_since_epoch_udf = (F.unix_timestamp('date') / F.lit(24 * 60 * 60 * 7)).cast('int')
 
     visit_concept_order_udf = F.row_number().over(
-        W.partitionBy('cohort_member_id', 'person_id', 'visit_occurrence_id') \
-            .orderBy('date', 'standard_concept_id')
+        W.partitionBy('cohort_member_id',
+                      'person_id',
+                      'visit_occurrence_id').orderBy('date', 'standard_concept_id')
     )
 
     patient_event = patient_event \
