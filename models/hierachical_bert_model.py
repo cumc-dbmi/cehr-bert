@@ -194,7 +194,10 @@ def transformer_hierarchical_bert_model(num_of_visits,
         visit_concept_mask,
         None)
 
-    global_concept_embeddings_normalization = tf.keras.layers.LayerNormalization(epsilon=1e-6)
+    global_concept_embeddings_normalization = tf.keras.layers.LayerNormalization(
+        name='global_concept_embeddings_normalization',
+        epsilon=1e-6
+    )
 
     global_concept_embeddings = global_concept_embeddings_normalization(
         global_concept_embeddings + contextualized_concept_embeddings
