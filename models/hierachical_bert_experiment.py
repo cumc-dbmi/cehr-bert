@@ -605,7 +605,6 @@ bert_data_generator = HierarchicalBertDataGenerator(training_data=patient_sequen
                                                     max_num_of_concepts=40,
                                                     sliding_window=10,
                                                     batch_size=16,
-                                                    max_seq_len=10 * 50,
                                                     min_num_of_concepts=10)
 
 steps_per_epoch = bert_data_generator.get_steps_per_epoch()
