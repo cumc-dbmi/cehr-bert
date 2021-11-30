@@ -494,3 +494,82 @@ class LogisticRegressionModelEvaluator(BaselineModelEvaluator):
 class XGBClassifierEvaluator(BaselineModelEvaluator):
     def _create_model(self, *args, **kwargs):
         return XGBClassifier()
+
+class HierarchicalBertEvaluator(SequenceModelEvaluator):
+    def __init__(self,
+                 max_seq_length: str,
+                 bert_model_path: str,
+                 tokenizer_path: str,
+                 is_temporal: bool = True,
+                 *args, **kwargs):
+        self._max_seq_length = max_seq_length
+        self._bert_model_path = bert_model_path
+        self._tokenizer = pickle.load(open(tokenizer_path, 'rb'))
+        self._is_temporal = is_temporal
+
+        self.get_logger().info(f'max_seq_length: {max_seq_length}\n'
+                               f'vanilla_bert_model_path: {bert_model_path}\n'
+                               f'tokenizer_path: {tokenizer_path}\n'
+                               f'is_temporal: {is_temporal}\n')
+
+        super(BertLstmModelEvaluator, self).__init__(*args, **kwargs)
+
+
+    def _create_model(self):
+        strategy = tf.distribute.MirroredStrategy()
+        self.get_logger().info('Number of devices: {}'.format(strategy.num_replicas_in_sync))
+        with strategy.scope():
+            create_model_fn = (create_temporal_bert_bi_lstm_model if self._is_temporal
+                               else create_vanilla_bert_bi_lstm_model)
+            try:
+                model = create_model_fn(self._max_seq_length, self._bert_model_path)
+            except ValueError as e:
+                self.get_logger().exception(e)
+                model = create_model_fn(self._max_seq_length, self._bert_model_path)
+
+            model.compile(loss='binary_crossentropy',
+                          optimizer=tf.keras.optimizers.Adam(1e-4),
+                          metrics=get_metrics())
+            return model
+
+    def k_fold(self):
+        
+        k_fold = KFold(n_splits=self._num_of_folds, shuffle=True, random_state=1)
+
+        for train, val_test in k_fold.split(self._dataset):
+            # further split val_test using a 2:3 ratio between val and test
+            val, test = train_test_split(val_test, test_size=0.6, random_state=1)
+            train_data = self._dataset.iloc[train]
+
+            data_generator = self.create_data_generator()
+            steps_per_epoch = data_generator.get_steps_per_epoch()
+            dataset = tf.data.Dataset.from_generator(
+                data_generator.create_batch_generator,
+                output_types=(data_generator.get_tf_dataset_schema())
+            ).prefetch(tf.data.experimental.AUTOTUNE)
+
+        if self._cache_dataset:
+            dataset = dataset.take(data_generator.get_steps_per_epoch()).cache().repeat()
+            dataset = dataset.prefetch(tf.data.experimental.AUTOTUNE)
+            if self._is_transfer_learning:
+                size = int(len(train) * self._training_percentage)
+                train = np.random.choice(train, size, replace=False)
+
+            training_input = {k: v[train] for k, v in inputs.items()}
+            val_input = {k: v[val] for k, v in inputs.items()}
+            test_input = {k: v[test] for k, v in inputs.items()}
+
+            tf.print(f'{self}: The train size is {len(train)}')
+            tf.print(f'{self}: The val size is {len(val)}')
+            tf.print(f'{self}: The test size is {len(test)}')
+
+            training_set = tf.data.Dataset.from_tensor_slices(
+                (training_input, labels[train])).cache().batch(self._batch_size)
+            val_set = tf.data.Dataset.from_tensor_slices(
+                (val_input, labels[val])).cache().batch(self._batch_size)
+            test_set = tf.data.Dataset.from_tensor_slices(
+                (test_input, labels[test])).cache().batch(self._batch_size)
+
+            yield training_set, val_set, test_set
+
+
