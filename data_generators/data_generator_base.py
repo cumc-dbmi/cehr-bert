@@ -442,3 +442,10 @@ class TimeAttentionDataGenerator(AbstractDataGeneratorBase):
 
     def estimate_data_size(self):
         return len(self._training_data.token_ids.explode())
+
+
+class FineTuningHierarchicalBertDataGenerator(HierarchicalBertDataGenerator):
+    def _get_learning_objective_classes(self):
+        return [HierarchicalMaskedLanguageModelLearningObjective,
+                DemographicsLearningObjective,
+                BertFineTuningLearningObjective]

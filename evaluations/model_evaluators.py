@@ -13,6 +13,7 @@ from models.evaluation_models import *
 from trainers.model_trainer import AbstractModel
 from utils.model_utils import *
 from data_generators.learning_objective import post_pad_pre_truncate
+from data_generators.data_generator_base import FineTuningHierarchicalBertDataGenerator
 
 
 def get_metrics():
@@ -495,6 +496,7 @@ class XGBClassifierEvaluator(BaselineModelEvaluator):
     def _create_model(self, *args, **kwargs):
         return XGBClassifier()
 
+
 class HierarchicalBertEvaluator(SequenceModelEvaluator):
     def __init__(self,
                  max_seq_length: str,
@@ -514,7 +516,6 @@ class HierarchicalBertEvaluator(SequenceModelEvaluator):
 
         super(BertLstmModelEvaluator, self).__init__(*args, **kwargs)
 
-
     def _create_model(self):
         strategy = tf.distribute.MirroredStrategy()
         self.get_logger().info('Number of devices: {}'.format(strategy.num_replicas_in_sync))
@@ -532,44 +533,27 @@ class HierarchicalBertEvaluator(SequenceModelEvaluator):
                           metrics=get_metrics())
             return model
 
-    def k_fold(self):
-        
-        k_fold = KFold(n_splits=self._num_of_folds, shuffle=True, random_state=1)
+    def create_data_generator(self, training_data):
+        data_generator = FineTuningHierarchicalBertDataGenerator(
+            training_data=training_data,
+            concept_tokenizer=self._tokenizer,
+            batch_size=self._batch_size,
+            max_num_of_visits=self._max_num_of_visits,
+            max_num_of_concepts=self._max_num_of_concepts
+        )
 
+        tf_dataset = tf.data.Dataset.from_generator(
+            data_generator.create_batch_generator,
+            output_types=(data_generator.get_tf_dataset_schema())
+        ).take(data_generator.get_steps_per_epoch()).cache().batch(self._batch_size)
+        return tf_dataset
+
+    def k_fold(self):
+        k_fold = KFold(n_splits=self._num_of_folds, shuffle=True, random_state=1)
         for train, val_test in k_fold.split(self._dataset):
             # further split val_test using a 2:3 ratio between val and test
             val, test = train_test_split(val_test, test_size=0.6, random_state=1)
-            train_data = self._dataset.iloc[train]
-
-            data_generator = self.create_data_generator()
-            steps_per_epoch = data_generator.get_steps_per_epoch()
-            dataset = tf.data.Dataset.from_generator(
-                data_generator.create_batch_generator,
-                output_types=(data_generator.get_tf_dataset_schema())
-            ).prefetch(tf.data.experimental.AUTOTUNE)
-
-        if self._cache_dataset:
-            dataset = dataset.take(data_generator.get_steps_per_epoch()).cache().repeat()
-            dataset = dataset.prefetch(tf.data.experimental.AUTOTUNE)
-            if self._is_transfer_learning:
-                size = int(len(train) * self._training_percentage)
-                train = np.random.choice(train, size, replace=False)
-
-            training_input = {k: v[train] for k, v in inputs.items()}
-            val_input = {k: v[val] for k, v in inputs.items()}
-            test_input = {k: v[test] for k, v in inputs.items()}
-
-            tf.print(f'{self}: The train size is {len(train)}')
-            tf.print(f'{self}: The val size is {len(val)}')
-            tf.print(f'{self}: The test size is {len(test)}')
-
-            training_set = tf.data.Dataset.from_tensor_slices(
-                (training_input, labels[train])).cache().batch(self._batch_size)
-            val_set = tf.data.Dataset.from_tensor_slices(
-                (val_input, labels[val])).cache().batch(self._batch_size)
-            test_set = tf.data.Dataset.from_tensor_slices(
-                (test_input, labels[test])).cache().batch(self._batch_size)
-
+            training_set = self.create_data_generator(self._dataset[train])
+            val_set = self.create_data_generator(self._dataset[val])
+            test_set = self.create_data_generator(self._dataset[test])
             yield training_set, val_set, test_set
-
-
