@@ -153,6 +153,12 @@ def create_spark_args():
                         action='store_true',
                         help='Specify whether to generate the sequence of '
                              'EHR records using the new patient representation')
+    parser.add_argument('-ih',
+                        '--is_hierarchical_bert',
+                        dest='is_hierarchical_bert',
+                        action='store_true',
+                        help='Specify whether to generate the sequence of '
+                             'EHR records using the hierarchical patient representation')
     parser.add_argument('-cbs',
                         '--classic_bert_seq',
                         dest='classic_bert_seq',

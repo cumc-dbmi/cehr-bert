@@ -14,8 +14,8 @@ from spark_apps.cohorts.query_builder import QueryBuilder, ENTRY_COHORT, NEGATIV
 COHORT_TABLE_NAME = 'cohort'
 PERSON = 'person'
 OBSERVATION_PERIOD = 'observation_period'
-DEFAULT_DEPENDENCY = ['person', 'observation_period', 'concept', 'concept_ancestor',
-                      'concept_relationship']
+DEFAULT_DEPENDENCY = ['person', 'visit_occurrence', 'observation_period', 'concept',
+                      'concept_ancestor', 'concept_relationship']
 
 
 def cohort_validator(required_columns_attribute):
@@ -243,6 +243,7 @@ class NestedCohortBuilder:
                  is_feature_concept_frequency: bool = False,
                  is_roll_up_concept: bool = False,
                  is_new_patient_representation: bool = False,
+                 is_hierarchical_bert: bool = False,
                  classic_bert_seq: bool = False,
                  is_first_time_outcome: bool = False,
                  is_questionable_outcome_existed: bool = False,
@@ -269,6 +270,7 @@ class NestedCohortBuilder:
         self._is_feature_concept_frequency = is_feature_concept_frequency
         self._is_roll_up_concept = is_roll_up_concept
         self._is_new_patient_representation = is_new_patient_representation
+        self._is_hierarchical_bert = is_hierarchical_bert
         self._is_first_time_outcome = is_first_time_outcome
         self._is_remove_index_prediction_starts = is_remove_index_prediction_starts
         self._is_questionable_outcome_existed = is_questionable_outcome_existed
@@ -293,6 +295,7 @@ class NestedCohortBuilder:
                                f'is_feature_concept_frequency: {is_feature_concept_frequency}\n'
                                f'is_roll_up_concept: {is_roll_up_concept}\n'
                                f'is_new_patient_representation: {is_new_patient_representation}\n'
+                               f'is_hierarchical_bert: {is_hierarchical_bert}\n'
                                f'is_first_time_outcome: {is_first_time_outcome}\n'
                                f'is_questionable_outcome_existed: {is_questionable_outcome_existed}\n'
                                f'is_remove_index_prediction_starts: {is_remove_index_prediction_starts}\n'
@@ -418,6 +421,12 @@ class NestedCohortBuilder:
             .select([ehr_records[field_name] for field_name in ehr_records.schema.fieldNames()]
                     + ['cohort_member_id'])
 
+        if self._is_hierarchical_bert:
+            return create_hierarchical_sequence_data(person=self._dependency_dict[PERSON],
+                                                     visit_occurrence=self._dependency_dict[
+                                                         VISIT_OCCURRENCE],
+                                                     patient_event=cohort_ehr_records)
+
         if self._is_feature_concept_frequency:
             return create_concept_frequency_data(cohort_ehr_records, None)
 
@@ -466,6 +475,7 @@ def create_prediction_cohort(spark_args,
     is_roll_up_concept = spark_args.is_roll_up_concept
     is_window_post_index = spark_args.is_window_post_index
     is_new_patient_representation = spark_args.is_new_patient_representation
+    is_hierarchical_bert = spark_args.is_hierarchical_bert
     classic_bert_seq = spark_args.classic_bert_seq
     is_first_time_outcome = spark_args.is_first_time_outcome
     is_prediction_window_unbounded = spark_args.is_prediction_window_unbounded
@@ -524,6 +534,7 @@ def create_prediction_cohort(spark_args,
                         is_feature_concept_frequency=is_feature_concept_frequency,
                         is_roll_up_concept=is_roll_up_concept,
                         is_new_patient_representation=is_new_patient_representation,
+                        is_hierarchical_bert=is_hierarchical_bert,
                         classic_bert_seq=classic_bert_seq,
                         is_first_time_outcome=is_first_time_outcome,
                         is_questionable_outcome_existed=is_questionable_outcome_existed,
