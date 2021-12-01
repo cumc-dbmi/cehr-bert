@@ -168,8 +168,7 @@ def evaluate_sequence_models(args):
             epochs=args.epochs,
             bert_model_path=bert_model_path,
             tokenizer_path=bert_tokenizer_path,
-            sequence_model_name=args.sequence_model_name,
-            embedding_size=args.embedding_size,
+            sequence_model_name=args.sequence_model_name
         ).eval_model()
 
 
