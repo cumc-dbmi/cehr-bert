@@ -21,7 +21,8 @@ def main(input_folder, output_folder, domain_table_list, date_filter, max_num_of
 
     visit_occurrence = preprocess_domain_table(spark, input_folder, VISIT_OCCURRENCE)
     person = preprocess_domain_table(spark, input_folder, PERSON)
-    patient_event = join_domain_tables(domain_tables)
+    patient_event = join_domain_tables(domain_tables) \
+        .withColumn('cohort_member_id', F.col('person_id'))
 
     sequence_data = create_hierarchical_sequence_data(
         person, visit_occurrence, patient_event,

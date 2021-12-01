@@ -736,6 +736,8 @@ def create_hierarchical_sequence_data(person, visit_occurrence, patient_event,
                      visit_occurrence_person.schema.fieldNames()]
 
     patient_columns = [
+        F.coalesce(patient_event['cohort_member_id'], visit_occurrence['person_id']).alias(
+            'cohort_member_id'),
         F.coalesce(patient_event['standard_concept_id'], F.lit(UNKNOWN_CONCEPT)).alias(
             'standard_concept_id'),
         F.coalesce(patient_event['date'],
@@ -747,7 +749,6 @@ def create_hierarchical_sequence_data(person, visit_occurrence, patient_event,
                                                  'left_outer') \
         .select(visit_columns + patient_columns) \
         .withColumn('standard_concept_id', F.col('standard_concept_id').cast('string')) \
-        .withColumn('cohort_member_id', F.col('person_id')) \
         .withColumn('age',
                     F.ceil(F.months_between(F.col('date'), F.col("birth_datetime")) / F.lit(12)))
 

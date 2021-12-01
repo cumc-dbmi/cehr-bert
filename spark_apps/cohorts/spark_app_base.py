@@ -395,6 +395,7 @@ class NestedCohortBuilder:
             .withColumn('cohort_member_id', cohort_member_id_udf)
 
         ehr_records_for_cohorts = self.extract_ehr_records_for_cohort(cohort)
+        # ehr_records_for_cohorts.show()
         cohort = cohort.join(ehr_records_for_cohorts, ['person_id', 'cohort_member_id']) \
             .where(F.col('num_of_visits') >= self._num_of_visits) \
             .where(F.col('num_of_concepts') >= self._num_of_concepts)
