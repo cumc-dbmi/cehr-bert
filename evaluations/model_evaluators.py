@@ -545,7 +545,7 @@ class HierarchicalBertEvaluator(SequenceModelEvaluator):
             data_generator.create_batch_generator,
             output_types=(data_generator.get_tf_dataset_schema())
         ).map(lambda x, y: (x, y['label'])).take(
-            data_generator.get_steps_per_epoch()).cache().batch(self._batch_size)
+            data_generator.get_steps_per_epoch()).cache()
         return tf_dataset
 
     def k_fold(self):
