@@ -557,9 +557,9 @@ class HierarchicalBertEvaluator(SequenceModelEvaluator):
                 size = int(len(train) * self._training_percentage)
                 train = np.random.choice(train, size, replace=False)
 
-            training_set = self.create_data_generator(self._dataset[train])
-            val_set = self.create_data_generator(self._dataset[val])
-            test_set = self.create_data_generator(self._dataset[test])
+            training_set = self.create_data_generator(self._dataset.iloc[train])
+            val_set = self.create_data_generator(self._dataset.iloc[val])
+            test_set = self.create_data_generator(self._dataset.iloc[test])
             yield training_set, val_set, test_set
 
     def extract_model_inputs(self):
