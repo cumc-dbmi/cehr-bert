@@ -499,34 +499,32 @@ class XGBClassifierEvaluator(BaselineModelEvaluator):
 
 class HierarchicalBertEvaluator(SequenceModelEvaluator):
     def __init__(self,
-                 max_seq_length: str,
                  bert_model_path: str,
                  tokenizer_path: str,
-                 is_temporal: bool = True,
+                 max_num_of_visits: int,
+                 max_num_of_concepts: int,
                  *args, **kwargs):
-        self._max_seq_length = max_seq_length
+        self._max_num_of_visits = max_num_of_visits
+        self._max_num_of_concepts = max_num_of_concepts
         self._bert_model_path = bert_model_path
         self._tokenizer = pickle.load(open(tokenizer_path, 'rb'))
-        self._is_temporal = is_temporal
 
-        self.get_logger().info(f'max_seq_length: {max_seq_length}\n'
+        self.get_logger().info(f'max_num_of_visits: {max_num_of_visits}\n'
+                               f'max_num_of_concepts: {max_num_of_concepts}\n'
                                f'vanilla_bert_model_path: {bert_model_path}\n'
-                               f'tokenizer_path: {tokenizer_path}\n'
-                               f'is_temporal: {is_temporal}\n')
+                               f'tokenizer_path: {tokenizer_path}\n')
 
-        super(BertLstmModelEvaluator, self).__init__(*args, **kwargs)
+        super(HierarchicalBertEvaluator, self).__init__(*args, **kwargs)
 
     def _create_model(self):
         strategy = tf.distribute.MirroredStrategy()
         self.get_logger().info('Number of devices: {}'.format(strategy.num_replicas_in_sync))
         with strategy.scope():
-            create_model_fn = (create_temporal_bert_bi_lstm_model if self._is_temporal
-                               else create_vanilla_bert_bi_lstm_model)
             try:
-                model = create_model_fn(self._max_seq_length, self._bert_model_path)
+                model = create_cher_bert_bi_lstm_model(self._bert_model_path)
             except ValueError as e:
                 self.get_logger().exception(e)
-                model = create_model_fn(self._max_seq_length, self._bert_model_path)
+                model = create_cher_bert_bi_lstm_model(self._bert_model_path)
 
             model.compile(loss='binary_crossentropy',
                           optimizer=tf.keras.optimizers.Adam(1e-4),
@@ -539,7 +537,8 @@ class HierarchicalBertEvaluator(SequenceModelEvaluator):
             concept_tokenizer=self._tokenizer,
             batch_size=self._batch_size,
             max_num_of_visits=self._max_num_of_visits,
-            max_num_of_concepts=self._max_num_of_concepts
+            max_num_of_concepts=self._max_num_of_concepts,
+            is_training=False
         )
 
         tf_dataset = tf.data.Dataset.from_generator(
@@ -553,7 +552,15 @@ class HierarchicalBertEvaluator(SequenceModelEvaluator):
         for train, val_test in k_fold.split(self._dataset):
             # further split val_test using a 2:3 ratio between val and test
             val, test = train_test_split(val_test, test_size=0.6, random_state=1)
+
+            if self._is_transfer_learning:
+                size = int(len(train) * self._training_percentage)
+                train = np.random.choice(train, size, replace=False)
+
             training_set = self.create_data_generator(self._dataset[train])
             val_set = self.create_data_generator(self._dataset[val])
             test_set = self.create_data_generator(self._dataset[test])
             yield training_set, val_set, test_set
+
+    def extract_model_inputs(self):
+        pass

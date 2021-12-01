@@ -247,6 +247,49 @@ def create_random_vanilla_bert_bi_lstm_model(max_seq_length,
     return lstm_with_vanilla_bert
 
 
+def create_cher_bert_bi_lstm_model(bert_model_path):
+    model = tf.keras.models.load_model(bert_model_path, custom_objects=get_custom_objects())
+
+    contextualized_embeddings = model.get_layer('global_concept_embeddings_normalization').output
+    _, max_seq_length, embedding_size = contextualized_embeddings.shape
+
+    pat_mask = model.get_layer('pat_mask').output
+    mask_embeddings = tf.cast(tf.reshape(pat_mask == 0, (-1, max_seq_length))[:, :, tf.newaxis],
+                              dtype=tf.float32)
+
+    contextualized_embeddings = tf.math.multiply(contextualized_embeddings, mask_embeddings)
+
+    age_of_visit_input = tf.keras.layers.Input(name='age', shape=(1,))
+
+    masking_layer = tf.keras.layers.Masking(mask_value=0.,
+                                            input_shape=(max_seq_length, embedding_size))
+
+    bi_lstm_layer = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(128))
+
+    dropout_lstm_layer = tf.keras.layers.Dropout(0.2)
+
+    dense_layer = tf.keras.layers.Dense(64, activation='relu')
+
+    dropout_dense_layer = tf.keras.layers.Dropout(0.2)
+
+    output_layer = tf.keras.layers.Dense(1, activation='sigmoid')
+
+    next_input = masking_layer(contextualized_embeddings)
+
+    next_input = dropout_lstm_layer(bi_lstm_layer(next_input))
+
+    next_input = tf.keras.layers.concatenate([next_input, age_of_visit_input])
+
+    next_input = dropout_dense_layer(dense_layer(next_input))
+
+    output = output_layer(next_input)
+
+    lstm_with_cher_bert = tf.keras.models.Model(inputs=model.inputs + [age_of_visit_input],
+                                                outputs=output, name='CHER_BERT_PLUS_BI_LSTM')
+
+    return lstm_with_cher_bert
+
+
 def create_temporal_bert_bi_lstm_model(max_seq_length, temporal_bert_model_path):
     temporal_bert_model = tf.keras.models.load_model(temporal_bert_model_path,
                                                      custom_objects=dict(**get_custom_objects()))
