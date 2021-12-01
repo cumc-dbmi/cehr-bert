@@ -272,7 +272,7 @@ def create_cher_bert_bi_lstm_model(bert_model_path):
 
     dropout_dense_layer = tf.keras.layers.Dropout(0.2)
 
-    output_layer = tf.keras.layers.Dense(1, activation='sigmoid')
+    output_layer = tf.keras.layers.Dense(1, activation='sigmoid', name='label')
 
     next_input = masking_layer(contextualized_embeddings)
 
