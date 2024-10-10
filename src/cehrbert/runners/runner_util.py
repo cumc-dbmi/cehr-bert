@@ -201,13 +201,18 @@ def generate_prepared_ds_path(data_args, model_args, data_folder=None) -> Path:
         + "|"
         + f"chronological_split={str(data_args.chronological_split)}"
     )
-    basename = os.path.basename(data_folder)
+    basename = os.path.basename(remove_trailing_slashes(data_folder))
     cleaned_basename = re.sub(r"[^a-zA-Z0-9_]", "", basename)
     LOG.info(f"concatenated_str: {concatenated_str}")
     ds_hash = f"{cleaned_basename}_{str(md5(concatenated_str))}"
     LOG.info(f"ds_hash: {ds_hash}")
     prepared_ds_path = Path(os.path.expanduser(data_args.dataset_prepared_path)) / ds_hash
     return prepared_ds_path
+
+
+def remove_trailing_slashes(path: str) -> str:
+    # Remove both forward slashes `/` and backward slashes `\` from the end
+    return path.rstrip("/\\")
 
 
 def parse_runner_args() -> Tuple[DataTrainingArguments, ModelArguments, TrainingArguments]:
@@ -332,9 +337,7 @@ def get_meds_extension_path(data_folder: str, dataset_prepared_path: str):
         If data_folder is "C:\\data\\" and dataset_prepared_path is "C:\\prepared_data",
         the function will return "C:\\prepared_data\\data_meds_extension".
     """
-    if data_folder.endswith("\\"):
-        data_folder = data_folder.rstrip("\\")
-    basename = os.path.basename(data_folder)
+    basename = os.path.basename(remove_trailing_slashes(data_folder))
     meds_extension_path = os.path.join(dataset_prepared_path, f"{basename}_meds_extension")
     return meds_extension_path
 

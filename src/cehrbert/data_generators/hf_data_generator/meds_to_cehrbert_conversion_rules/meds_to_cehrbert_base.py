@@ -57,7 +57,7 @@ class MedsToCehrBertConversion(ABC):
                                                  or None if no rule exists.
     """
 
-    def __init__(self):
+    def __init__(self, **kwargs):
         """
         Initializes the MedsToCehrBertConversion class by caching the matching rules and.
 

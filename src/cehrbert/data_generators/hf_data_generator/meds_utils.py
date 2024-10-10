@@ -1,27 +1,22 @@
 import collections
 import functools
 import os
-import re
 from datetime import datetime
-from typing import Dict, Iterable, List, Optional, Tuple, Union
+from typing import Dict, List, Tuple, Union
 
 import meds_reader
 import numpy as np
 import pandas as pd
 from datasets import Dataset, DatasetDict, Split
 
+from cehrbert.data_generators.hf_data_generator import DEFAULT_INPATIENT_CONCEPT_ID, UNKNOWN_VALUE
 from cehrbert.data_generators.hf_data_generator.hf_dataset import apply_cehrbert_dataset_mapping
-from cehrbert.data_generators.hf_data_generator.hf_dataset_mapping import MedToCehrBertDatasetMapping, birth_codes
-from cehrbert.data_generators.hf_data_generator.meds_to_cehrbert_conversion_rules.meds_to_cehrbert_base import (
-    MedsToCehrBertConversion,
-)
-from cehrbert.med_extension.schema_extension import CehrBertPatient, Event, Visit
+from cehrbert.data_generators.hf_data_generator.hf_dataset_mapping import MedToCehrBertDatasetMapping
+from cehrbert.data_generators.hf_data_generator.meds_to_cehrbert_conversion_rules import MedsToCehrBertConversion
+from cehrbert.data_generators.hf_data_generator.patient_block import generate_demographics_and_patient_blocks
+from cehrbert.med_extension.schema_extension import CehrBertPatient, Visit
 from cehrbert.runners.hf_runner_argument_dataclass import DataTrainingArguments, MedsToCehrBertConversionType
 
-UNKNOWN_VALUE = "Unknown"
-DEFAULT_ED_CONCEPT_ID = "9203"
-DEFAULT_OUTPATIENT_CONCEPT_ID = "9202"
-DEFAULT_INPATIENT_CONCEPT_ID = "9201"
 MEDS_SPLIT_DATA_SPLIT_MAPPING = {
     "train": Split.TRAIN,
     "tuning": Split.VALIDATION,
@@ -31,15 +26,15 @@ NON_ALPHANUMERIC_CHARS = r"[\w\/\\:\-_]"
 
 
 def get_meds_to_cehrbert_conversion_cls(
-    meds_to_cehrbert_conversion_type: Union[MedsToCehrBertConversionType, str],
+    meds_to_cehrbert_conversion_type: Union[MedsToCehrBertConversionType, str], **kwargs
 ) -> MedsToCehrBertConversion:
     for cls in MedsToCehrBertConversion.__subclasses__():
         if isinstance(meds_to_cehrbert_conversion_type, MedsToCehrBertConversionType):
             if meds_to_cehrbert_conversion_type.name == cls.__name__:
-                return cls()
+                return cls(**kwargs)
         elif isinstance(meds_to_cehrbert_conversion_type, str):
             if meds_to_cehrbert_conversion_type == cls.__name__:
-                return cls()
+                return cls(**kwargs)
     raise RuntimeError(f"{meds_to_cehrbert_conversion_type} is not a valid MedsToCehrBertConversionType")
 
 
@@ -49,290 +44,80 @@ def get_subject_split(meds_reader_db_path: str) -> Dict[str, List[int]]:
     return result
 
 
-class PatientBlock:
-    """
-    Represents a block of medical events for a single patient visit, including.
-
-    inferred visit type and various admission and discharge statuses.
-
-    Attributes:
-        visit_id (int): The unique ID of the visit.
-        events (List[meds_reader.Event]): A list of medical events associated with this visit.
-        min_time (datetime): The earliest event time in the visit.
-        max_time (datetime): The latest event time in the visit.
-        conversion (MedsToCehrBertConversion): Conversion object for mapping event codes to CEHR-BERT.
-        has_ed_admission (bool): Whether the visit includes an emergency department (ED) admission event.
-        has_admission (bool): Whether the visit includes an admission event.
-        has_discharge (bool): Whether the visit includes a discharge event.
-        visit_type (str): The inferred type of visit, such as inpatient, ED, or outpatient.
-    """
-
-    def __init__(
-        self,
-        events: List[meds_reader.Event],
-        visit_id: int,
-        conversion: MedsToCehrBertConversion,
-    ):
-        """
-        Initializes a PatientBlock instance, inferring the visit type based on the events and caching.
-
-        admission and discharge status.
-
-        Args:
-            events (List[meds_reader.Event]): The medical events associated with the visit.
-            visit_id (int): The unique ID of the visit.
-            conversion (MedsToCehrBertConversion): Conversion object for mapping event codes to CEHR-BERT.
-
-        Attributes are initialized to store visit metadata and calculate admission/discharge statuses.
-        """
-        self.visit_id = visit_id
-        self.events = events
-        self.min_time = events[0].time
-        self.max_time = events[-1].time
-        self.conversion = conversion
-
-        # Cache these variables so we don't need to compute
-        self.has_ed_admission = self._has_ed_admission()
-        self.has_admission = self._has_admission()
-        self.has_discharge = self._has_discharge()
-
-        # Infer the visit_type from the events
-        # Admission takes precedence over ED
-        if self.has_admission:
-            self.visit_type = DEFAULT_INPATIENT_CONCEPT_ID
-        elif self.has_ed_admission:
-            self.visit_type = DEFAULT_ED_CONCEPT_ID
-        else:
-            self.visit_type = DEFAULT_OUTPATIENT_CONCEPT_ID
-
-    def _has_ed_admission(self) -> bool:
-        """
-        Determines if the visit includes an emergency department (ED) admission event.
-
-        Returns:
-            bool: True if an ED admission event is found, False otherwise.
-        """
-        for event in self.events:
-            for matching_rule in self.conversion.get_ed_admission_matching_rules():
-                if re.match(matching_rule, event.code):
-                    return True
-        return False
-
-    def _has_admission(self) -> bool:
-        """
-        Determines if the visit includes a hospital admission event.
-
-        Returns:
-            bool: True if an admission event is found, False otherwise.
-        """
-        for event in self.events:
-            for matching_rule in self.conversion.get_admission_matching_rules():
-                if re.match(matching_rule, event.code):
-                    return True
-        return False
-
-    def _has_discharge(self) -> bool:
-        """
-        Determines if the visit includes a discharge event.
-
-        Returns:
-            bool: True if a discharge event is found, False otherwise.
-        """
-        for event in self.events:
-            for matching_rule in self.conversion.get_discharge_matching_rules():
-                if re.match(matching_rule, event.code):
-                    return True
-        return False
-
-    def get_discharge_facility(self) -> Optional[str]:
-        """
-        Extracts the discharge facility code from the discharge event, if present.
-
-        Returns:
-            Optional[str]: The sanitized discharge facility code, or None if no discharge event is found.
-        """
-        if self._has_discharge():
-            for event in self.events:
-                for matching_rule in self.conversion.get_discharge_matching_rules():
-                    if matching_rule in event.code:
-                        discharge_facility = event.code.replace(matching_rule, "")
-                        discharge_facility = re.sub(r"[^a-zA-Z]", "_", discharge_facility)
-                        return discharge_facility
-        return None
-
-    def _convert_event(self, event) -> List[Event]:
-        """
-        Converts a medical event into a list of CEHR-BERT-compatible events, potentially parsing.
-
-        numeric values from text-based events.
-
-        Args:
-            event (meds_reader.Event): The medical event to be converted.
-
-        Returns:
-            List[Event]: A list of converted events, possibly numeric, based on the original event's code and value.
-        """
-        code = event.code
-        time = getattr(event, "time", None)
-        text_value = getattr(event, "text_value", None)
-        numeric_value = getattr(event, "numeric_value", None)
-        unit = getattr(event, "unit", None)
-
-        if numeric_value is None and text_value is not None:
-            conversion_rule = self.conversion.get_text_event_to_numeric_events_rule(code)
-            if conversion_rule:
-                match = re.search(conversion_rule.parsing_pattern, text_value)
-                if match:
-                    if len(match.groups()) == len(conversion_rule.mapped_event_labels):
-                        events = [
-                            Event(
-                                code=label,
-                                time=time,
-                                numeric_value=float(value),
-                                unit=unit,
-                                properties={"visit_id": self.visit_id, "table": "meds"},
-                            )
-                            for label, value in zip(conversion_rule.mapped_event_labels, match.groups())
-                            if value.isnumeric()
-                        ]
-                        return events
-
-        return [
-            Event(
-                code=code,
-                time=time,
-                numeric_value=numeric_value,
-                unit=unit,
-                text_value=text_value,
-                properties={"visit_id": self.visit_id, "table": "meds"},
-            )
-        ]
-
-    def get_meds_events(self) -> Iterable[Event]:
-        """
-        Retrieves all medication events for the visit, converting each raw event if necessary.
-
-        Returns:
-            Iterable[Event]: A list of CEHR-BERT-compatible medication events for the visit.
-        """
-        events = []
-        for e in self.events:
-            events.extend(self._convert_event(e))
-        return events
-
-
 def convert_one_patient(
     patient: meds_reader.Subject,
     conversion: MedsToCehrBertConversion,
-    default_visit_id: int = 1,
     prediction_time: datetime = None,
     label: Union[int, float] = None,
 ) -> CehrBertPatient:
-    birth_datetime = None
-    race = None
-    gender = None
-    ethnicity = None
+    """
+    Converts a patient's event data into a CehrBertPatient object, processing.
 
-    visit_id = default_visit_id
-    current_date = None
-    events_for_current_date = []
-    patient_blocks = []
-    for e in patient.events:
+    their medical history, visit details, and demographic information.
 
-        # Skip out of the loop if the events's time stamps are beyond the prediction time
-        if prediction_time is not None and e.time is not None:
-            if e.time > prediction_time:
-                break
+    Parameters:
+    ----------
+    patient : meds_reader.Subject
+        The patient's event data, including time-stamped medical events such as
+        demographic data (race, gender, ethnicity) and clinical visits (ED admissions,
+        hospital admissions, discharges).
 
-        # This indicates demographics features
-        if e.code in birth_codes:
-            birth_datetime = e.time
-        elif e.code.startswith("RACE"):
-            race = e.code
-        elif e.code.startswith("GENDER"):
-            gender = e.code
-        elif e.code.startswith("ETHNICITY"):
-            ethnicity = e.code
-        elif e.time is not None:
-            if not current_date:
-                current_date = e.time
+    conversion : MedsToCehrBertConversion
+        The conversion object to map and process medical event data into the format
+        required by CehrBert.
 
-            if current_date.date() == e.time.date():
-                events_for_current_date.append(e)
-            else:
-                patient_blocks.append(PatientBlock(events_for_current_date, visit_id, conversion))
-                events_for_current_date = list()
-                events_for_current_date.append(e)
-                current_date = e.time
-                visit_id += 1
+    default_visit_id : int, optional (default=1)
+        The starting ID for patient visits. This is incremented as new visits are
+        identified in the event data.
 
-    if events_for_current_date:
-        patient_blocks.append(PatientBlock(events_for_current_date, visit_id, conversion))
+    prediction_time : datetime, optional (default=None)
+        The cutoff time for processing events. Events occurring after this time are
+        ignored.
 
-    admit_discharge_pairs = []
-    active_ed_index = None
-    active_admission_index = None
-    # |ED|24-hours|Admission| ... |Discharge| -> ED will be merged into the admission (within 24 hours)
-    # |ED|25-hours|Admission| ... |Discharge| -> ED will NOT be merged into the admission
-    # |Admission|ED| ... |Discharge| -> ED will be merged into the admission
-    # |Admission|Admission|ED| ... |Discharge|
-    #   -> The first admission will be ignored and turned into a separate visit
-    #   -> The second Admission and ED will be merged
-    for i, patient_block in enumerate(patient_blocks):
-        # Keep track of the ED block when there is no on-going admission
-        if patient_block.has_ed_admission and active_admission_index is None:
-            active_ed_index = i
-        # Keep track of the admission block
-        if patient_block.has_admission:
-            # If the ED event has occurred, we need to check the time difference between
-            # the ED event and the subsequent hospital admission
-            if active_ed_index is not None:
+    label : Union[int, float], optional (default=None)
+        The prediction label associated with this patient, which could represent a
+        clinical outcome (e.g., survival or treatment response).
 
-                hour_diff = (patient_block.min_time - patient_blocks[active_ed_index].max_time).total_seconds() / 3600
-                # If the time difference between the ed and admission is leq 24 hours,
-                # we consider ED to be part of the visits
-                if hour_diff <= 24 or active_ed_index == i:
-                    active_admission_index = active_ed_index
-                    active_ed_index = None
-            else:
-                active_admission_index = i
+    Returns:
+    -------
+    CehrBertPatient
+        An object containing the patient's transformed event data, visits, demographics,
+        and associated label in a structure compatible with CehrBert's input requirements.
 
-        if patient_block.has_discharge:
-            if active_admission_index is not None:
-                admit_discharge_pairs.append((active_admission_index, i))
-            # When the patient is discharged from the hospital, we assume the admission and ED should end
-            active_admission_index = None
-            active_ed_index = None
+    Description:
+    -----------
+    This function processes a patient's medical history, including demographic
+    information (birth date, race, gender, and ethnicity) and visit details. It iterates
+    through the patient's events and groups them into visits (ED, admission, discharge).
+    Visits are formed based on timestamps, and certain logic is applied to merge ED visits
+    into hospital admissions if they occur within 24 hours of each other.
 
-        # Check the last block of the patient history to see whether the admission is partial
-        if i == len(patient_blocks) - 1:
-            # This indicates an ongoing (incomplete) inpatient visit,
-            # this is a common pattern for inpatient visit prediction problems,
-            # where the data from the first 24-48 hours after the admission
-            # are used to predict something about the admission
-            if active_admission_index is not None and prediction_time is not None:
-                admit_discharge_pairs.append((active_admission_index, i))
+    For each event, demographic attributes like birth date, race, gender, and ethnicity
+    are extracted. If the event has a timestamp, it is compared with `prediction_time` to
+    filter out events that occurred after the specified time.
 
-    # Update visit_id for the admission blocks
-    for admit_index, discharge_index in admit_discharge_pairs:
-        admission_block = patient_blocks[admit_index]
-        discharge_block = patient_blocks[discharge_index]
-        visit_id = admission_block.visit_id
-        for i in range(admit_index, discharge_index + 1):
-            patient_blocks[i].visit_id = visit_id
-            patient_blocks[i].visit_type = DEFAULT_INPATIENT_CONCEPT_ID
-        # There could be events that occur after the discharge, which are considered as part of the visit
-        # we need to check if the time stamp of the next block is within 12 hours
-        if discharge_index + 1 < len(patient_blocks):
-            next_block = patient_blocks[discharge_index + 1]
-            hour_diff = (next_block.min_time - discharge_block.max_time).total_seconds() / 3600
-            assert hour_diff >= 0, (
-                f"next_block.min_time: {next_block.min_time} "
-                f"must be GE discharge_block.max_time: {discharge_block.max_time}"
-            )
-            if hour_diff <= 12:
-                next_block.visit_id = visit_id
-                next_block.visit_type = DEFAULT_INPATIENT_CONCEPT_ID
+    The function handles ongoing (incomplete) visits and cases where multiple visits
+    should be merged (e.g., ED followed by hospital admission within 24 hours). After
+    processing the events, visits are built with details such as visit type, start/end
+    datetime, and events during the visit.
+
+    The function returns a `CehrBertPatient` object that includes the patient's medical
+    events, structured into visits, along with demographic information, and optionally
+    a prediction label.
+
+    Example Usage:
+    -------------
+    patient_data = convert_one_patient(
+        patient=some_patient_object,
+        conversion=some_conversion_object,
+        default_visit_id=1,
+        prediction_time=datetime.now(),
+        label=1
+    )
+    """
+    demographics, patient_blocks = generate_demographics_and_patient_blocks(
+        conversion=conversion, patient=patient, prediction_time=prediction_time
+    )
 
     patient_block_dict = collections.defaultdict(list)
     for patient_block in patient_blocks:
@@ -362,24 +147,26 @@ def convert_one_patient(
             )
         )
     age_at_index = -1
-    if prediction_time is not None and birth_datetime is not None:
-        age_at_index = prediction_time.year - birth_datetime.year
+    if prediction_time is not None and demographics.birth_datetime is not None:
+        age_at_index = prediction_time.year - demographics.birth_datetime.year
         if (prediction_time.month, prediction_time.day) < (
-            birth_datetime.month,
-            birth_datetime.day,
+            demographics.birth_datetime.month,
+            demographics.birth_datetime.day,
         ):
             age_at_index -= 1
 
     # birth_datetime can not be None
-    assert birth_datetime is not None, f"patient_id: {patient.subject_id} does not have a valid birth_datetime"
+    assert (
+        demographics.birth_datetime is not None
+    ), f"patient_id: {patient.subject_id} does not have a valid birth_datetime"
 
     return CehrBertPatient(
         patient_id=patient.subject_id,
-        birth_datetime=birth_datetime,
+        birth_datetime=demographics.birth_datetime,
         visits=visits,
-        race=race if race else UNKNOWN_VALUE,
-        gender=gender if gender else UNKNOWN_VALUE,
-        ethnicity=ethnicity if ethnicity else UNKNOWN_VALUE,
+        race=demographics.race if demographics.race else UNKNOWN_VALUE,
+        gender=demographics.gender if demographics.gender else UNKNOWN_VALUE,
+        ethnicity=demographics.ethnicity if demographics.ethnicity else UNKNOWN_VALUE,
         index_date=prediction_time,
         age_at_index=age_at_index,
         label=label,
@@ -419,12 +206,14 @@ def _meds_to_cehrbert_generator(
     default_visit_id: int,
     meds_to_cehrbert_conversion_type: MedsToCehrBertConversionType,
 ) -> CehrBertPatient:
-    conversion = get_meds_to_cehrbert_conversion_cls(meds_to_cehrbert_conversion_type)
+    conversion = get_meds_to_cehrbert_conversion_cls(
+        meds_to_cehrbert_conversion_type, default_visit_id=default_visit_id
+    )
     with meds_reader.SubjectDatabase(path_to_db) as patient_database:
         for shard in shards:
             for patient_id, prediction_time, label in shard:
                 patient = patient_database[patient_id]
-                yield convert_one_patient(patient, conversion, default_visit_id, prediction_time, label)
+                yield convert_one_patient(patient, conversion, prediction_time, label)
 
 
 def _create_cehrbert_data_from_meds(

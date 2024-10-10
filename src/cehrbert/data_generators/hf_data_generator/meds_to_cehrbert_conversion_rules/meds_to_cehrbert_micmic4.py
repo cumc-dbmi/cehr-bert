@@ -9,6 +9,10 @@ from cehrbert.data_generators.hf_data_generator.meds_to_cehrbert_conversion_rule
 
 class MedsToBertMimic4(MedsToCehrBertConversion):
 
+    def __init__(self, default_visit_id, **kwargs):
+        super().__init__(**kwargs)
+        self.default_visit_id = default_visit_id
+
     def _create_ed_admission_matching_rules(self) -> List[str]:
         return ["ED_REGISTRATION//", "TRANSFER_TO//ED"]
 

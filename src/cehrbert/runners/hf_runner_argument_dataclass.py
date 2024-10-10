@@ -7,6 +7,7 @@ from cehrbert_data.decorators.patient_event_decorator_base import AttType
 from cehrbert.data_generators.hf_data_generator.meds_to_cehrbert_conversion_rules import (
     MedsToBertMimic4,
     MedsToCehrBertConversion,
+    MedsToCehrbertOMOP,
 )
 
 # Create an enum dynamically from the list
@@ -111,14 +112,15 @@ class DataTrainingArguments:
     )
     # TODO: Python 3.9/10 do not support dynamic unpacking, we have to manually provide the entire
     #  list right now.
-    meds_to_cehrbert_conversion_type: Literal[MedsToCehrBertConversionType[MedsToBertMimic4.__name__]] = (
-        dataclasses.field(
-            default=MedsToCehrBertConversionType[MedsToBertMimic4.__name__],
-            metadata={
-                "help": "The MEDS to CEHRBERT conversion type e.g. MedsToBertMimic4",
-                "choices": f"choices={[e for e in MedsToCehrBertConversionType.__members__]}",
-            },
-        )
+    meds_to_cehrbert_conversion_type: Literal[
+        MedsToCehrBertConversionType[MedsToBertMimic4.__name__],
+        MedsToCehrBertConversionType[MedsToCehrbertOMOP.__name__],
+    ] = dataclasses.field(
+        default=MedsToCehrBertConversionType[MedsToBertMimic4.__name__],
+        metadata={
+            "help": "The MEDS to CEHRBERT conversion type e.g. MedsToBertMimic4",
+            "choices": f"choices={[e for e in MedsToCehrBertConversionType.__members__]}",
+        },
     )
     include_auxiliary_token: Optional[bool] = dataclasses.field(
         default=False,
